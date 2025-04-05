@@ -15,6 +15,9 @@ NO_IMPROVEMENT_LIMIT = 40  #Local optimum threshold
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
 CROSSOVER_TYPE = "UNIFORM"
 
+#Fitness mode (options: DISTANCE, LCS)
+FITNESS_MODE = "LCS"
+
 #Individual class representing a single solution
 class Individual:
     def __init__(self, genome):
@@ -24,7 +27,46 @@ class Individual:
     #A fuction to calculate the fitness of the individual
     #The fitness is the sum of absolute differences between the genome and target
     def calculate_fitness(self, target):
-        self.fitness = sum(abs(ord(g) - ord(t)) for g, t in zip(self.genome, target))
+        if FITNESS_MODE == "DISTANCE":
+            self.fitness = sum(abs(ord(g) - ord(t)) for g, t in zip(self.genome, target))
+        #LCS fitness is the length of the longest common subsequence and bonus of 4 for each correct character (in the right position) of the characters of the LCS
+        elif FITNESS_MODE == "LCS":
+            self.fitness = self.fitness_by_lcs(self.genome, target)
+        else:
+            raise ValueError("Invalid fitness mode")
+
+    #computeing the fitness of the individual using the "LCS" method
+    #The function works by finding the length of the longest common subsequence (LCS) between the individual and the target, and adding a bonus for each LCS character that is in the right position
+    def fitness_by_lcs(self, a, b):
+        m = len(a)
+        n = len(b)
+        L = [[0] * (n + 1) for _ in range(m + 1)]
+
+        #Filling the LCS table
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if a[i - 1] == b[j - 1]:
+                    L[i][j] = L[i - 1][j - 1] + 1
+                else:
+                    L[i][j] = max(L[i - 1][j], L[i][j - 1])
+        lcs_length = L[m][n]
+
+        #Backtracking to find the number of LCS characters that are in the right position
+        correct_chars_count = 0
+        bonus = 4
+        while m > 0 and n > 0:
+            if a[m - 1] == b[n - 1]:
+                m -= 1
+                n -= 1
+                if m == n: #ckecks the LCS genome character is in the right position
+                    correct_chars_count += 1
+            elif L[m - 1][n] > L[m][n - 1]:
+                m -= 1
+            else:
+                n -= 1
+        max_possible = (bonus+1) * len(b)
+        return max_possible - (lcs_length + bonus * correct_chars_count)
+
 
 #Population class representing a collection of individuals
 class Population:
@@ -218,7 +260,7 @@ def main():
         population.individuals, buffer = buffer, population.individuals
         final_generation = generation + 1
 
-    #Final values 
+    #Final values of time 
     end_wall_time = time.time()
     end_cpu_time  = time.process_time()
     total_wall    = end_wall_time - start_wall_time
