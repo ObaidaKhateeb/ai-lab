@@ -10,6 +10,35 @@ class Individual:
 
     def calculate_fitness(self, target):
         self.fitness = sum(abs(ord(g) - ord(t)) for g, t in zip(self.genome, target))
+
+class Population:
+    def __init__(self, size, target):
+        self.size = size
+        self.target = target
+        self.individuals = self.init_population()
+
+    def init_population(self):
+        tsize = len(self.target)
+        population = []
+        for _ in range(self.size):
+            genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
+            individual = Individual(genome)
+            population.append(individual)
+        return population
+
+    def update_fitness(self):
+        for ind in self.individuals:
+            ind.calculate_fitness(self.target)
+
+    def sort_by_fitness(self):
+        self.individuals.sort(key=lambda ind: ind.fitness)
+    
+    def elitism(self, buffer, esize):
+        for i in range(esize):
+            buffer[i] = self.individuals[i]
+        return buffer
+    
+
 # -----------------------------
 # GA PARAMETERS
 # -----------------------------
@@ -27,21 +56,7 @@ NO_IMPROVEMENT_LIMIT = 40  # local optimum threshold
 # Choose one of: "SINGLE", "TWO", "UNIFORM"
 CROSSOVER_TYPE = "TWO"
 
-def init_population(pop_size, target):
-    population = []
-    tsize = len(target)
-    for _ in range(pop_size):
-        genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
-        individual = Individual(genome)
-        population.append(individual)
-    return population
 
-def sort_by_fitness(population):
-    population.sort(key=lambda ind: ind.fitness)
-
-def elitism(population, buffer, esize):
-    for i in range(esize):
-        buffer[i] = population[i]
 
 def mutate(individual, target):
     tsize = len(target)
@@ -79,16 +94,16 @@ def uniform_crossover(p1, p2):
     return "".join(child)
 
 def mate(population, buffer, target):
-    pop_size = len(population)
+    pop_size = population.size
     esize = int(pop_size * GA_ELITRATE)
-    elitism(population, buffer, esize)
+    buffer = population.elitism(buffer, esize)
 
     for i in range(esize, pop_size):
         i1 = random.randint(0, pop_size // 2 - 1)
         i2 = random.randint(0, pop_size // 2 - 1)
 
-        p1 = population[i1].genome
-        p2 = population[i2].genome
+        p1 = population.individuals[i1].genome
+        p2 = population.individuals[i2].genome
 
         if CROSSOVER_TYPE == "SINGLE":
             child_genome = single_point_crossover(p1, p2)
@@ -105,11 +120,8 @@ def mate(population, buffer, target):
 
 def main():
     random.seed(time.time())
-
-    pop_alpha = init_population(GA_POPSIZE, GA_TARGET)
-    pop_beta  = [ind for ind in pop_alpha]
-    population = pop_alpha
-    buffer     = pop_beta
+    population = Population(GA_POPSIZE, GA_TARGET)
+    buffer = [ind for ind in population.individuals]
 
     start_wall_time = time.time()
     start_cpu_time  = time.process_time()
@@ -129,17 +141,16 @@ def main():
 
     for generation in range(GA_MAXITER):
         # Calculate fitness for the entire population
-        for individual in population:
-            individual.calculate_fitness(GA_TARGET)
-        sort_by_fitness(population)
+        population.update_fitness()
+        population.sort_by_fitness()
 
-        best_fit  = population[0].fitness
-        worst_fit = population[-1].fitness
+        best_fit  = population.individuals[0].fitness
+        worst_fit = population.individuals[-1].fitness
         fitness_range = worst_fit - best_fit
-        sum_fit   = sum(ind.fitness for ind in population)
-        avg_fit   = sum_fit / len(population)
+        sum_fit   = sum(ind.fitness for ind in population.individuals)
+        avg_fit   = sum_fit / population.size
 
-        variance  = sum((ind.fitness - avg_fit)**2 for ind in population) / len(population)
+        variance  = sum((ind.fitness - avg_fit)**2 for ind in population.individuals) / population.size
         std_dev   = math.sqrt(variance) if variance>0 else 0
 
         ticks_cpu = time.process_time() - start_cpu_time
@@ -150,7 +161,7 @@ def main():
         worst_fitness_list.append(worst_fit)
 
         # store distribution for boxplot
-        gen_fitness_list = [ind.fitness for ind in population]
+        gen_fitness_list = [ind.fitness for ind in population.individuals]
         fitness_history.append(gen_fitness_list)
 
         # Print EXACT text
@@ -162,7 +173,7 @@ def main():
               f"Std={std_dev:.2f}, "
               f"TicksCPU={ticks_cpu:.4f}, "
               f"Elapsed={elapsed:.2f}s, "
-              f"BestString='{population[0].genome}'")
+              f"BestString='{population.individuals[0].genome}'")
 
         if best_fit < best_fit_so_far:
             best_fit_so_far = best_fit
@@ -181,7 +192,7 @@ def main():
             break
 
         mate(population, buffer, GA_TARGET)
-        population, buffer = buffer, population
+        population.individuals, buffer = buffer, population.individuals
         final_generation = generation + 1
 
     end_wall_time = time.time()
