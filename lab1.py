@@ -106,8 +106,11 @@ def mate(population, buffer, target):
             child_genome = single_point_crossover(p1, p2)
         elif CROSSOVER_TYPE == "TWO":
             child_genome = two_point_crossover(p1, p2)
-        else:  # "UNIFORM"
+        elif CROSSOVER_TYPE == "UNIFORM":
             child_genome = uniform_crossover(p1, p2)
+        else:
+            raise ValueError("Invalid crossover type")
+        
 
         buffer[i] = Individual(child_genome)
         buffer[i].calculate_fitness(target)
