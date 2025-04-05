@@ -4,7 +4,7 @@ import math
 import matplotlib.pyplot as plt
 
 #GA Parameters
-GA_POPSIZE       = 16384     #Population size
+GA_POPSIZE       = 8192     #Population size
 GA_MAXITER       = 100    #Maximum number of iterations
 GA_ELITRATE      = 0.05     #Elitism rate
 GA_MUTATIONRATE  = 0.25     #Mutation rate
@@ -13,10 +13,10 @@ GA_CHARSIZE      = 90       #Range of characters (roughly ' ' to '~')
 NO_IMPROVEMENT_LIMIT = 40  #Local optimum threshold
 
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
-CROSSOVER_TYPE = "UNIFORM"
+CROSSOVER_TYPE = "SINGLE"
 
 #Fitness mode (options: DISTANCE, LCS)
-FITNESS_MODE = "LCS"
+FITNESS_MODE = "DISTANCE"
 
 #Individual class representing a single solution
 class Individual:
@@ -204,6 +204,12 @@ def mate(population, buffer, target):
         if random.random() < GA_MUTATIONRATE:
             mutate(buffer[i])
 
+#A method that computes and prints the CPU time and elapsed time (task 2)
+def time_compute(start_cpu_time, start_wall_time):
+    ticks_cpu = time.process_time() - start_cpu_time
+    elapsed   = time.time() - start_wall_time
+    #print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
+
 
 def main():
     random.seed(time.time())
@@ -231,10 +237,7 @@ def main():
         population.generation_stats_update(generation)
 
         #Computing and printing the CPU time and elapsed time (task 2)
-        ticks_cpu = time.process_time() - start_cpu_time
-        elapsed   = time.time() - start_wall_time
-
-        print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
+        time_compute(start_cpu_time, start_wall_time)
 
         #Checking for convergence
         if population.individuals[0].fitness == 0:
