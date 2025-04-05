@@ -161,16 +161,16 @@ def main():
         gen_fitness_list = [ind.fitness for ind in population.individuals]
         fitness_history.append(gen_fitness_list)
 
-        # Print EXACT text
-        print(f"Gen={generation:4d}, "
-              f"Best={best_fit}, "
-              f"Worst={worst_fit}, "
-              f"Range={fitness_range}, "
-              f"Avg={avg_fit:.2f}, "
-              f"Std={std_dev:.2f}, "
-              f"TicksCPU={ticks_cpu:.4f}, "
-              f"Elapsed={elapsed:.2f}s, "
-              f"BestString='{population.individuals[0].genome}'")
+        #Printing the generation best and worst individuals, fitness range, average fitness, and standard deviation (task 1)
+        print(f"Gen{generation}." 
+                f" Best: {population.individuals[0].genome} ({best_fit})", 
+                f" Worst: {population.individuals[-1].genome} ({worst_fit}) ",
+                f" Fitness Range: {fitness_range} ",
+                f" Avg: {avg_fit:.2f} ",
+                f" Std: {std_dev:.2f} ")
+        
+        #Printing the CPU time and elapsed time (task 2)
+        print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
 
         if best_fit < best_fit_so_far:
             best_fit_so_far = best_fit
