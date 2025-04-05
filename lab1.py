@@ -82,10 +82,7 @@ def uniform_crossover(p1, p2):
 def mate(population, buffer, target):
     pop_size = len(population)
     esize = int(pop_size * GA_ELITRATE)
-    #print the buffer before and after elitism
-    print("Buffer before elitism:", buffer)
     elitism(population, buffer, esize)
-    print("Buffer after elitism:", buffer)
 
     for i in range(esize, pop_size):
         i1 = random.randint(0, pop_size // 2 - 1)
