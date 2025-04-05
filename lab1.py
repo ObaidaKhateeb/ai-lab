@@ -3,6 +3,23 @@ import time
 import math
 import matplotlib.pyplot as plt
 
+# -----------------------------
+# GA PARAMETERS
+# -----------------------------
+GA_POPSIZE       = 16384     # Population size
+GA_MAXITER       = 100    # Maximum number of iterations
+GA_ELITRATE      = 0.05     # Elitism rate
+GA_MUTATIONRATE  = 0.25     # Mutation rate
+GA_TARGET        = "Hello world!"
+GA_CHARSIZE      = 90       # Range of characters (roughly ' ' to '~')
+NO_IMPROVEMENT_LIMIT = 40  # local optimum threshold
+
+# -----------------------------
+# CROSSOVER MODES
+# -----------------------------
+# Choose one of: "SINGLE", "TWO", "UNIFORM"
+CROSSOVER_TYPE = "TWO"
+
 class Individual:
     def __init__(self, genome):
         self.genome = genome
@@ -37,26 +54,6 @@ class Population:
         for i in range(esize):
             buffer[i] = self.individuals[i]
         return buffer
-    
-
-# -----------------------------
-# GA PARAMETERS
-# -----------------------------
-GA_POPSIZE       = 16384     # Population size
-GA_MAXITER       = 100    # Maximum number of iterations
-GA_ELITRATE      = 0.05     # Elitism rate
-GA_MUTATIONRATE  = 0.25     # Mutation rate
-GA_TARGET        = "Hello world!"
-GA_CHARSIZE      = 90       # Range of characters (roughly ' ' to '~')
-NO_IMPROVEMENT_LIMIT = 40  # local optimum threshold
-
-# -----------------------------
-# CROSSOVER MODES
-# -----------------------------
-# Choose one of: "SINGLE", "TWO", "UNIFORM"
-CROSSOVER_TYPE = "TWO"
-
-
 
 def mutate(individual, target):
     tsize = len(target)
