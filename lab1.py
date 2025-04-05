@@ -25,11 +25,9 @@ class Individual:
         self.fitness = None
 
     #A fuction to calculate the fitness of the individual
-    #The fitness is the sum of absolute differences between the genome and target
     def calculate_fitness(self, target):
-        if FITNESS_MODE == "DISTANCE":
+        if FITNESS_MODE == "DISTANCE": #The distance fitness is the sum of absolute differences between the genome and target
             self.fitness = sum(abs(ord(g) - ord(t)) for g, t in zip(self.genome, target))
-        #LCS fitness is the length of the longest common subsequence and bonus of 4 for each correct character (in the right position) of the characters of the LCS
         elif FITNESS_MODE == "LCS":
             self.fitness = self.fitness_by_lcs(self.genome, target)
         else:
