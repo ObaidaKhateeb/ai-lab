@@ -236,8 +236,6 @@ def main():
 
         print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
 
-
-
         #Checking for convergence
         if population.individuals[0].fitness == 0:
             print("Global optimum found!")
