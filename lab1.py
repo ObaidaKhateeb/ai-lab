@@ -72,6 +72,10 @@ class Population:
         self.size = size
         self.target = target
         self.individuals = self.init_population()
+        self.best_fitness_list = []
+        self.avg_fitness_list = []
+        self.worst_fitness_list = []
+        self.fitness_history = []
 
     #A function to initialize the population with random individuals
     def init_population(self):
@@ -97,6 +101,32 @@ class Population:
         for i in range(esize):
             buffer[i] = self.individuals[i]
         return buffer
+    
+    #A function that computes and prints the generation best and worst individuals, fitness range, average fitness, and standard deviation (task 1)
+    def generation_stats_update(self, generation):
+        best_fit  = self.individuals[0].fitness
+        worst_fit = self.individuals[-1].fitness
+        fitness_range = worst_fit - best_fit
+        sum_fit   = sum(ind.fitness for ind in self.individuals)
+        avg_fit   = sum_fit / self.size
+        variance  = sum((ind.fitness - avg_fit)**2 for ind in self.individuals) / self.size
+        std_dev   = math.sqrt(variance) if variance>0 else 0
+        
+        print(f"Gen{generation}." 
+                f" Best: {self.individuals[0].genome} ({best_fit})", 
+                f" Worst: {self.individuals[-1].genome} ({worst_fit}) ",
+                f" Fitness Range: {fitness_range} ",
+                f" Avg: {avg_fit:.2f} ",
+                f" Std: {std_dev:.2f} ")
+
+        #Storing the best, average, and worst fitness for line plots use (task 3a)
+        self.best_fitness_list.append(best_fit)
+        self.avg_fitness_list.append(avg_fit)
+        self.worst_fitness_list.append(worst_fit)
+
+        #Storing the distribution of fitness for boxplots use (task 3b)
+        gen_fitness_list = [ind.fitness for ind in self.individuals]
+        self.fitness_history.append(gen_fitness_list)
 
 #A function to mutate an individual by changing a random character in its genome
 def mutate(individual):
@@ -174,6 +204,7 @@ def mate(population, buffer, target):
         if random.random() < GA_MUTATIONRATE:
             mutate(buffer[i])
 
+
 def main():
     random.seed(time.time())
 
@@ -189,13 +220,6 @@ def main():
     best_fit_so_far = float('inf')
     no_improvement_count = 0
 
-    #Data structures for line plots use
-    best_fitness_list = []
-    avg_fitness_list  = []
-    worst_fitness_list = []
-
-    #Data structure for boxplots use
-    fitness_history = []
     final_generation = 0
 
     for generation in range(GA_MAXITER):
@@ -204,20 +228,7 @@ def main():
         population.sort_by_fitness()
 
         #Computing and printing the generation best and worst individuals, fitness range, average fitness, and standard deviation (task 1)
-        best_fit  = population.individuals[0].fitness
-        worst_fit = population.individuals[-1].fitness
-        fitness_range = worst_fit - best_fit
-        sum_fit   = sum(ind.fitness for ind in population.individuals)
-        avg_fit   = sum_fit / population.size
-        variance  = sum((ind.fitness - avg_fit)**2 for ind in population.individuals) / population.size
-        std_dev   = math.sqrt(variance) if variance>0 else 0
-
-        print(f"Gen{generation}." 
-                f" Best: {population.individuals[0].genome} ({best_fit})", 
-                f" Worst: {population.individuals[-1].genome} ({worst_fit}) ",
-                f" Fitness Range: {fitness_range} ",
-                f" Avg: {avg_fit:.2f} ",
-                f" Std: {std_dev:.2f} ")
+        population.generation_stats_update(generation)
 
         #Computing and printing the CPU time and elapsed time (task 2)
         ticks_cpu = time.process_time() - start_cpu_time
@@ -225,23 +236,16 @@ def main():
 
         print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
 
-        #Storing the best, average, and worst fitness for line plots (task 3a)
-        best_fitness_list.append(best_fit)
-        avg_fitness_list.append(avg_fit)
-        worst_fitness_list.append(worst_fit)
 
-        #Storing the distribution of fitness for boxplots (task 3b)
-        gen_fitness_list = [ind.fitness for ind in population.individuals]
-        fitness_history.append(gen_fitness_list)
 
         #Checking for convergence
-        if best_fit == 0:
+        if population.individuals[0].fitness == 0:
             print("Global optimum found!")
             final_generation = generation + 1
             break
 
-        if best_fit < best_fit_so_far:
-            best_fit_so_far = best_fit
+        if population.individuals[0].fitness < best_fit_so_far:
+            best_fit_so_far = population.individuals[0].fitness
             no_improvement_count = 0
         else:
             no_improvement_count += 1
@@ -269,10 +273,10 @@ def main():
 
     #Plotting the best, average, and worst fitness over generations (task 3a)
     plt.figure(figsize=(10, 6))
-    plt.plot(best_fitness_list,  label="Best Fitness")
-    plt.plot(avg_fitness_list,   label="Average Fitness")
-    plt.plot(worst_fitness_list, label="Worst Fitness")
-    plt.title(f"GA Fitness Over Generations (Crossover: {CROSSOVER_TYPE})")
+    plt.plot(population.best_fitness_list,  label="Best Fitness")
+    plt.plot(population.avg_fitness_list,   label="Average Fitness")
+    plt.plot(population.worst_fitness_list, label="Worst Fitness")
+    plt.title(f"GA Fitness Over Generations\nCrossover={CROSSOVER_TYPE}, Fitness={FITNESS_MODE}")
     plt.xlabel("Generation")
     plt.ylabel("Fitness")
     plt.legend()
@@ -281,10 +285,10 @@ def main():
 
     #Plotting the boxplots for each generation's distribution (task 3b)
     for g in range(final_generation):
-        gen_data = fitness_history[g]
+        gen_data = population.fitness_history[g]
         plt.figure(figsize=(4,5))
         plt.boxplot(gen_data, showfliers=True)
-        plt.title(f"Box Plot of Fitness - Gen {g} ({CROSSOVER_TYPE})")
+        plt.title(f"Box Plot of Fitness - Gen {g} ({CROSSOVER_TYPE}, {FITNESS_MODE})")
         plt.ylabel("Fitness")
         plt.show()
 
