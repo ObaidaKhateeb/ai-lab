@@ -200,9 +200,7 @@ def main():
     print(f"Finished after {final_generation} generations.")
     print(f"Total wall-clock time: {total_wall:.2f}s, Total CPU time: {total_cpu:.2f}s")
 
-    # --------------------------------------------------
-    # Plot (1) Best, Avg, Worst
-    # --------------------------------------------------
+    #Plotting the best, average, and worst fitness over generations (task 3a)
     plt.figure(figsize=(10, 6))
     plt.plot(best_fitness_list,  label="Best Fitness")
     plt.plot(avg_fitness_list,   label="Average Fitness")
@@ -214,9 +212,7 @@ def main():
     plt.grid(True)
     plt.show()
 
-    # --------------------------------------------------
-    # Plot (2) Box plots for each generation's distribution (optional)
-    # --------------------------------------------------
+    #Plotting the boxplots for each generation's distribution (task 3b)
     for g in range(final_generation):
         gen_data = fitness_history[g]
         plt.figure(figsize=(4,5))
