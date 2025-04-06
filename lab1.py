@@ -168,7 +168,6 @@ def mutate(individual):
 #Single-point crossover function to combine two parents into a child
 #The function works by selecting a random crossover point, in which the first part of the child is taken from the first parent and the second part from the second parent
 def single_point_crossover(p1, p2):
-    """ Single-point crossover """
     tsize = len(p1)
     spos = random.randint(0, tsize - 1)
     return p1[:spos] + p2[spos:]
@@ -176,7 +175,6 @@ def single_point_crossover(p1, p2):
 #Two-point crossover function to combine two parents into a child
 #The function works by selecting two random crossover points, in which the first and third part of the child is taken from the first parent and the second part from the second parent
 def two_point_crossover(p1, p2):
-    """ Two-point crossover """
     tsize = len(p1)
     point1 = random.randint(0, tsize - 1)
     point2 = random.randint(point1, tsize - 1)
@@ -185,7 +183,6 @@ def two_point_crossover(p1, p2):
 #Uniform crossover function to combine two parents into a child
 #The function works by randomly selecting each gene from either parent
 def uniform_crossover(p1, p2):
-    """ Uniform crossover: each gene randomly from p1 or p2 """
     child = []
     for ch1, ch2 in zip(p1, p2):
         if random.random() < 0.5:
