@@ -128,6 +128,28 @@ class Population:
         gen_fitness_list = [ind.fitness for ind in self.individuals]
         self.fitness_history.append(gen_fitness_list)
 
+    #A function that plots the best, average, and worst fitness over generations (task 3a)
+    def fitness_plot(self):
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.best_fitness_list,  label="Best Fitness")
+        plt.plot(self.avg_fitness_list,   label="Average Fitness")
+        plt.plot(self.worst_fitness_list, label="Worst Fitness")
+        plt.title(f"GA Fitness Over Generations\nCrossover={CROSSOVER_TYPE}, Fitness={FITNESS_MODE}")
+        plt.xlabel("Generation")
+        plt.ylabel("Fitness")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    #A function that plots the boxplots for each generation's distribution (task 3b)
+    def fitness_boxplot(self):
+        for g,data in enumerate(self.fitness_history):
+            plt.figure(figsize=(4,5))
+            plt.boxplot(data, showfliers=True)
+            plt.title(f"Box Plot of Fitness - Gen {g} ({CROSSOVER_TYPE}, {FITNESS_MODE})")
+            plt.ylabel("Fitness")
+            plt.show()
+
 #A function to mutate an individual by changing a random character in its genome
 def mutate(individual):
     tsize = len(individual.genome)
@@ -208,8 +230,7 @@ def mate(population, buffer, target):
 def time_compute(start_cpu_time, start_wall_time):
     ticks_cpu = time.process_time() - start_cpu_time
     elapsed   = time.time() - start_wall_time
-    #print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.2f}s")
-
+    print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.4f}s")
 
 def main():
     random.seed(time.time())
@@ -226,8 +247,6 @@ def main():
     best_fit_so_far = float('inf')
     no_improvement_count = 0
 
-    final_generation = 0
-
     for generation in range(GA_MAXITER):
         #Updating the fitness of the population and sorting its population
         population.update_fitness()
@@ -242,7 +261,6 @@ def main():
         #Checking for convergence
         if population.individuals[0].fitness == 0:
             print("Global optimum found!")
-            final_generation = generation + 1
             break
 
         if population.individuals[0].fitness < best_fit_so_far:
@@ -253,7 +271,6 @@ def main():
 
         if no_improvement_count >= NO_IMPROVEMENT_LIMIT:
             print("No improvement => Local optimum convergence.")
-            final_generation = generation + 1
             break
 
         #Mating the population
@@ -261,7 +278,6 @@ def main():
 
         #Updating the population of the next generation
         population.individuals, buffer = buffer, population.individuals
-        final_generation = generation + 1
 
     #Final values of time 
     end_wall_time = time.time()
@@ -269,29 +285,14 @@ def main():
     total_wall    = end_wall_time - start_wall_time
     total_cpu     = end_cpu_time - start_cpu_time
 
-    print(f"Finished after {final_generation} generations.")
+    print(f"Finished after {len(population.fitness_history)} generations.")
     print(f"Total wall-clock time: {total_wall:.2f}s, Total CPU time: {total_cpu:.2f}s")
 
     #Plotting the best, average, and worst fitness over generations (task 3a)
-    plt.figure(figsize=(10, 6))
-    plt.plot(population.best_fitness_list,  label="Best Fitness")
-    plt.plot(population.avg_fitness_list,   label="Average Fitness")
-    plt.plot(population.worst_fitness_list, label="Worst Fitness")
-    plt.title(f"GA Fitness Over Generations\nCrossover={CROSSOVER_TYPE}, Fitness={FITNESS_MODE}")
-    plt.xlabel("Generation")
-    plt.ylabel("Fitness")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    population.fitness_plot()
 
     #Plotting the boxplots for each generation's distribution (task 3b)
-    for g in range(final_generation):
-        gen_data = population.fitness_history[g]
-        plt.figure(figsize=(4,5))
-        plt.boxplot(gen_data, showfliers=True)
-        plt.title(f"Box Plot of Fitness - Gen {g} ({CROSSOVER_TYPE}, {FITNESS_MODE})")
-        plt.ylabel("Fitness")
-        plt.show()
+    population.fitness_boxplot()
 
 if __name__ == "__main__":
     main()
