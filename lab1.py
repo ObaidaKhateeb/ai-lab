@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 
 #GA Parameters
 GA_POPSIZE       = 8192     #Population size
-GA_MAXITER       = 100    #Maximum number of iterations
+GA_MAXITER       = 120    #Maximum number of iterations
 GA_ELITRATE      = 0.05     #Elitism rate
 GA_MUTATIONRATE  = 0.25     #Mutation rate
 GA_TARGET        = "Hello world!" #Target string
 GA_CHARSIZE      = 90       #Range of characters (roughly ' ' to '~')
-NO_IMPROVEMENT_LIMIT = 40  #Local optimum threshold
+NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
 CROSSOVER_TYPE = "SINGLE"
