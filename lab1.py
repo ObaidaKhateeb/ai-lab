@@ -2,6 +2,7 @@ import random
 import time
 import math
 import matplotlib.pyplot as plt
+import sys
 
 #GA Parameters
 GA_POPSIZE       = 8192     #Population size
@@ -51,7 +52,7 @@ class Individual:
 
         #Backtracking to find the number of LCS characters that are in the right position
         correct_chars_count = 0
-        bonus = 4
+        bonus = 2
         while m > 0 and n > 0:
             if a[m - 1] == b[n - 1]:
                 m -= 1
@@ -229,7 +230,7 @@ def time_compute(start_cpu_time, start_wall_time):
     elapsed   = time.time() - start_wall_time
     print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.4f}s")
 
-def main():
+def main(max_time):
     random.seed(time.time())
 
     #Initializing the population and buffer
@@ -270,6 +271,10 @@ def main():
             print("No improvement => Local optimum convergence.")
             break
 
+        if time.time() - start_wall_time > max_time:
+            print("Time limit exceeded.")
+            break
+
         #Mating the population
         mate(population, buffer, GA_TARGET)
 
@@ -292,4 +297,14 @@ def main():
     population.fitness_boxplot()
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: python your_script.py <max_time_in_seconds>")
+        sys.exit(1)
+    try:
+        max_time = float(sys.argv[1])
+        if max_time <= 0:
+            raise ValueError
+    except ValueError:
+        print("Error: max_time must be a positive number.")
+        sys.exit(1)
+    main(max_time)
