@@ -14,10 +14,10 @@ GA_CHARSIZE      = 90       #Range of characters (roughly ' ' to '~')
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
-CROSSOVER_TYPE = "SINGLE"
+CROSSOVER_TYPE = "UNIFORM"
 
 #Fitness mode (options: DISTANCE, LCS)
-FITNESS_MODE = "DISTANCE"
+FITNESS_MODE = "LCS"
 
 #Individual class representing a single solution
 class Individual:
@@ -77,6 +77,8 @@ class Population:
         self.avg_fitness_list = []
         self.worst_fitness_list = []
         self.fitness_history = []
+        self.generation_fitness_var = []
+        self.top_avg_select_ratio = []
 
     #A function to initialize the population with random individuals
     def init_population(self):
@@ -151,6 +153,19 @@ class Population:
             plt.ylabel("Fitness")
             plt.show()
 
+    #A function that plots the exploitation factor over generations (task 8)
+    def fitness_variance_plot(self):
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.generation_fitness_var, label="Fitness Variance") #Factor 1: Fitness Variance
+        plt.plot(self.top_avg_select_ratio, label="Top Avg Select Ratio") #Factor 2: Top Average Selection Probability Ratio
+        plt.title(f"Choose Variance Over Generations\n")
+        plt.xlabel("Generation")
+        plt.ylabel("Exploitation Factor")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
 #A function to mutate an individual by changing a random character in its genome
 def mutate(individual):
     tsize = len(individual.genome)
@@ -199,6 +214,8 @@ def mate(population, buffer, target):
     esize = int(pop_size * GA_ELITRATE)
     buffer = population.elitism(buffer, esize) #updates the first esize individuals in the buffer with the best individuals from the population
 
+    select_count = [0] * pop_size #tracking the number of times each individual is chosen as a parent
+
     for i in range(esize, pop_size):
         
         #Selecting two random parents from the top half of the population
@@ -224,11 +241,36 @@ def mate(population, buffer, target):
         if random.random() < GA_MUTATIONRATE:
             mutate(buffer[i])
 
+        #Updating the number of times each individual is chosen as a parent
+        select_count[i1] += 1
+        select_count[i2] += 1
+    
+    #computing the variance of selecting probability
+    fitness_var = fitness_variance(select_count, pop_size) 
+    population.generation_fitness_var.append(fitness_var) 
+    #cimputing the top-average selection probability ratio
+    top_avg = top_avg_select_ratio(select_count)
+    population.top_avg_select_ratio.append(top_avg)
+
 #A method that computes and prints the CPU time and elapsed time (task 2)
 def time_compute(start_cpu_time, start_wall_time):
     ticks_cpu = time.process_time() - start_cpu_time
     elapsed   = time.time() - start_wall_time
     print(f"    Ticks CPU: {ticks_cpu:.4f}, Elapsed: {elapsed:.4f}s")
+
+#A function that computes the variance of selecting probability (task 8)
+def fitness_variance(select_count, population_size):
+    choose_prob = [count / population_size for count in select_count]
+    avg_choose_prob = sum(choose_prob) / population_size
+    variance = sum((p - avg_choose_prob) ** 2 for p in choose_prob) / population_size
+    return variance
+
+#A function that computes the top average selection probability ratio (task 8)
+def top_avg_select_ratio(select_count):
+    top_half = select_count[:len(select_count)//2]
+    top_avg = sum(top_half) / len(top_half)
+    all_avg = sum(select_count) / len(select_count)
+    return top_avg / all_avg if all_avg != 0 else 0
 
 def main(max_time):
     random.seed(time.time())
@@ -295,6 +337,9 @@ def main(max_time):
 
     #Plotting the boxplots for each generation's distribution (task 3b)
     population.fitness_boxplot()
+
+    #Plotting the chosen individuals' fitness variance over generations 
+    population.fitness_variance_plot()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
