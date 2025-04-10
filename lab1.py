@@ -52,7 +52,7 @@ class Individual:
 
         #Backtracking to find the number of LCS characters that are in the right position
         correct_chars_count = 0
-        bonus = 2
+        bonus = 4
         while m > 0 and n > 0:
             if a[m - 1] == b[n - 1]:
                 m -= 1
