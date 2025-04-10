@@ -17,7 +17,7 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 CROSSOVER_TYPE = "UNIFORM"
 
 #Fitness mode (options: DISTANCE, LCS)
-FITNESS_MODE = "LCS"
+FITNESS_MODE = "DISTANCE"
 
 #Individual class representing a single solution
 class Individual:
@@ -79,6 +79,9 @@ class Population:
         self.fitness_history = []
         self.generation_fitness_var = []
         self.top_avg_select_ratio = []
+        self.avg_dist_list = [] 
+        self.distinct_alleles_list = [] 
+        self.shannon_entropy_list = []
 
     #A function to initialize the population with random individuals
     def init_population(self):
@@ -153,14 +156,27 @@ class Population:
             plt.ylabel("Fitness")
             plt.show()
 
-    #A function that plots the exploitation factor over generations (task 8)
-    def fitness_variance_plot(self):
+    #A function to plot the selection pressure statistics over generations (task 8)
+    def plot_selection_pressure(self):
         plt.figure(figsize=(10, 6))
         plt.plot(self.generation_fitness_var, label="Fitness Variance") #Factor 1: Fitness Variance
-        plt.plot(self.top_avg_select_ratio, label="Top Avg Select Ratio") #Factor 2: Top Average Selection Probability Ratio
-        plt.title(f"Choose Variance Over Generations\n")
+        plt.plot(self.top_avg_select_ratio, label="Top-Average Ratio") #Factor 2: Top Average Selection Probability Ratio
+        plt.title("Selection Pressure Over Generations")
         plt.xlabel("Generation")
         plt.ylabel("Exploitation Factor")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    #A function to plot the genetic diversity metrics over generations (task 9)
+    def plot_diversity(self):
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.avg_dist_list, label="Avg Pairwise Distance") #Factor 1: Average Distance
+        plt.plot(self.distinct_alleles_list, label="Distinct Alleles") #Factor 2: Distinct Alleles Count
+        plt.plot(self.shannon_entropy_list, label="Shannon Entropy") #Factor 3: Shannon Entropy
+        plt.title("Genetic Diversity Over Generations")
+        plt.xlabel("Generation")
+        plt.ylabel("Diversity Factor")
         plt.legend()
         plt.grid(True)
         plt.show()
@@ -248,9 +264,17 @@ def mate(population, buffer, target):
     #computing the variance of selecting probability
     fitness_var = fitness_variance(select_count, pop_size) 
     population.generation_fitness_var.append(fitness_var) 
-    #cimputing the top-average selection probability ratio
+    #computing the top-average selection probability ratio
     top_avg = top_avg_select_ratio(select_count)
     population.top_avg_select_ratio.append(top_avg)
+
+    #computing the genetic diversity of the population 
+    distance_avg = distance_average(population.individuals)
+    distinct_alleles_count = distinct_alleles(population.individuals)
+    shannon_entropy_value = shannon_entropy(population.individuals)
+    population.avg_dist_list.append(distance_avg)
+    population.distinct_alleles_list.append(distinct_alleles_count)
+    population.shannon_entropy_list.append(shannon_entropy_value)
 
 #A method that computes and prints the CPU time and elapsed time (task 2)
 def time_compute(start_cpu_time, start_wall_time):
@@ -271,6 +295,53 @@ def top_avg_select_ratio(select_count):
     top_avg = sum(top_half) / len(top_half)
     all_avg = sum(select_count) / len(select_count)
     return top_avg / all_avg if all_avg != 0 else 0
+
+#A function to compute the average distance between individuals in the population (section 9)
+def distance_average(individuals):
+    if len(individuals) < 2:
+        return 0.0
+
+    genome_length = len(individuals[0].genome)
+    total_distance = 0
+    n = len(individuals)
+
+    for pos in range(genome_length):
+        #Counting the frequency of each character at the current position
+        freq = {}
+        for ind in individuals:
+            ch = ind.genome[pos]
+            if ch in freq:
+                freq[ch] += 1
+            else:
+                freq[ch] = 1
+
+        #Computing the total distance for the current position
+        chars = list(freq.items())
+        for i in range(len(chars)):
+            char_i, count_i = chars[i]
+            for j in range(i + 1, len(chars)):
+                char_j, count_j = chars[j]
+                diff = abs(ord(char_i) - ord(char_j))
+                total_distance += count_i * count_j * diff
+
+    total_pairs = n * (n - 1) // 2 
+    return total_distance / total_pairs
+
+#A function that computes the number of different alleles in the population (section 9)
+def distinct_alleles(individuals):
+    all_chars = set(ch for ind in individuals for ch in ind.genome)
+    return len(all_chars)
+
+#A function that computes the Shannon entropy of the population (section 9)
+def shannon_entropy(individuals):
+    char_counts = {}
+    total_chars = 0
+    for ind in individuals:
+        for ch in ind.genome:
+            char_counts[ch] = char_counts.get(ch, 0) + 1
+            total_chars += 1
+    entropy = -sum((count / total_chars) * math.log2(count / total_chars) for count in char_counts.values() if count > 0)
+    return entropy
 
 def main(max_time):
     random.seed(time.time())
@@ -338,8 +409,11 @@ def main(max_time):
     #Plotting the boxplots for each generation's distribution (task 3b)
     population.fitness_boxplot()
 
-    #Plotting the chosen individuals' fitness variance over generations 
-    population.fitness_variance_plot()
+    #Plotting the chosen individuals' fitness variance over generations (task 8)
+    population.plot_selection_pressure()
+
+    #Plotting the genetic diversity of the population over generations (task 9)
+    population.plot_diversity()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
