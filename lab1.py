@@ -20,14 +20,14 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
+PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
 
 #Tournament Parameters
-TOURNAMENT_K = 5
+TOURNAMENT_K = 7
 TOURNAMENT_P = 0.8
 
 #Survivor selection method (STANDARD, AGING)
-SURVIVOR_SELECTION_METHOD = "AGING"
+SURVIVOR_SELECTION_METHOD = "STANDARD"
 AGE_LIMIT = 15
 
 #Individual class representing a single solution
@@ -36,6 +36,7 @@ class Individual:
         self.genome = genome
         self.fitness = None
         self.age = 0
+        self.rank = None
 
     #A fuction to calculate the fitness of the individual
     def calculate_fitness(self, target):
@@ -267,11 +268,13 @@ def mate(population, buffer, target):
             i2, p2 = parents[1]
             parents = parents[2:] #removing the two chosen parents from the list
         elif PARENT_SELECTION_METHOD == "TOURNAMENT_DET":
-            i1, p1 = tournament_selection_deter(population.individuals)
-            i2, p2 = tournament_selection_deter(population.individuals)
+            individuals_ranked = fitness_ranking(population.individuals)
+            i1, p1 = tournament_selection_deter(individuals_ranked)
+            i2, p2 = tournament_selection_deter(individuals_ranked)
         elif PARENT_SELECTION_METHOD == "TOURNAMENT_STOCH":
-            i1, p1 = tournament_selection_stoch(population.individuals)
-            i2, p2 = tournament_selection_stoch(population.individuals)
+            individuals_ranked = fitness_ranking(population.individuals)
+            i1, p1 = tournament_selection_stoch(individuals_ranked)
+            i2, p2 = tournament_selection_stoch(individuals_ranked)
         else:
             raise ValueError("Invalid parent selection method")
 
@@ -459,7 +462,14 @@ def tournament_selection_stoch(individuals):
 def linear_scaling(individuals, a,b):
     scaled_fitness = [a * ind.fitness + b for ind in individuals]
     return scaled_fitness
-    
+
+#A function that rank the fitnesses by converting them to ranks (Section 10)
+def fitness_ranking(individuals, reverse=False):
+    sorted_inds = sorted(individuals, key=lambda ind: ind.fitness, reverse=reverse)
+    for rank, ind in enumerate(sorted_inds):
+        ind.rank = rank + 1
+    return sorted_inds
+
 #A function to increment the age of each individual in the population and remove the old between them
 def aging(population):
     for ind in population.individuals:
