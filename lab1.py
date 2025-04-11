@@ -20,16 +20,22 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "RWS"
-#Tournament selection K,P factors
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
+
+#Tournament Parameters
 TOURNAMENT_K = 5
 TOURNAMENT_P = 0.8
+
+#Survivor selection method (STANDARD, AGING)
+SURVIVOR_SELECTION_METHOD = "AGING"
+AGE_LIMIT = 15
 
 #Individual class representing a single solution
 class Individual:
     def __init__(self, genome):
         self.genome = genome
         self.fitness = None
+        self.age = 0
 
     #A fuction to calculate the fitness of the individual
     def calculate_fitness(self, target):
@@ -234,6 +240,12 @@ def uniform_crossover(p1, p2):
 def mate(population, buffer, target):
     pop_size = population.size
     esize = int(pop_size * GA_ELITRATE)
+    
+    #Age update and removal of old individuals
+    if SURVIVOR_SELECTION_METHOD == "AGING":
+        aging(population)
+
+    esize = min(esize, len(population.individuals)) #Ensuring esize does not exceed the population size
     buffer = population.elitism(buffer, esize) #updates the first esize individuals in the buffer with the best individuals from the population
 
     select_count = [0] * pop_size #tracking the number of times each individual is chosen as a parent
@@ -272,7 +284,7 @@ def mate(population, buffer, target):
             child_genome = uniform_crossover(p1, p2)
         else:
             raise ValueError("Invalid crossover type")
-        
+
         buffer[i] = Individual(child_genome)
         buffer[i].calculate_fitness(target)
 
@@ -372,20 +384,27 @@ def top_half_uniform_selection(population):
 
 #A function that selects a parent using RWS (section 10)
 def rws_selection(individuals):
+    
+    #Scaling the fitness values using linear scaling    
     max_fitness = max(ind.fitness for ind in individuals)
     scaled_fitnesses = linear_scaling(individuals, -1, max_fitness)
+    
+    #Converting fitness values to probabilities
     total_scaled = sum(scaled_fitnesses)
     selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
+    
     if total_scaled == 0:
         random_choice = random.randint(0, len(individuals) - 1)
         return random_choice, individuals[random_choice].genome
     
+    #Building the "roulete"
     cumulative_probs = []
     cumsum = 0
     for prob in selection_probs:
         cumsum += prob
         cumulative_probs.append(cumsum)
     
+    #Selecting a random individual
     pick = random.random()
     for i, prob in enumerate(cumulative_probs):
         if pick < prob:
@@ -394,17 +413,23 @@ def rws_selection(individuals):
 
 #A function that selects a list of parents using SUS (Section 10)
 def sus_selection(individuals, num_parents):
+    
+    #Scaling the fitness values using linear scaling
     max_fitness = max(ind.fitness for ind in individuals)
     scaled_fitness = linear_scaling(individuals, -1, max_fitness)
+
+    #Converting fitness values to probabilities
     total_fitness = sum(scaled_fitness)
     selection_probs = [fit / total_fitness for fit in scaled_fitness]
     
+    #Building the "roulete"
     cumulative_probs = []
     cumsum = 0
     for prob in selection_probs:
         cumsum += prob
         cumulative_probs.append(cumsum)
-    
+
+    #Selecting a random starting point, then parents
     rand = random.random() / num_parents
     parents = []
     for i in range(num_parents):
@@ -415,26 +440,31 @@ def sus_selection(individuals, num_parents):
                 break
     return parents
 
-#A function that selects a parent using Deterministic Tournament Selection
+#A function that selects a parent using Deterministic Tournament Selection (Section 10)
 def tournament_selection_deter(individuals):
-    tournament = random.sample(range(len(individuals)), TOURNAMENT_K)    
-    tournament.sort(key=lambda ind: individuals[ind].fitness)
+    tournament = random.sample(range(len(individuals)), TOURNAMENT_K) #choosing K random indices 
+    tournament.sort(key=lambda ind: individuals[ind].fitness) #sorting the corresponding individuals
     return tournament[0], individuals[tournament[0]].genome
 
-#A function that selects a parent using Stochastic Tournament Selection
+#A function that selects a parent using Stochastic Tournament Selection (Section 10)
 def tournament_selection_stoch(individuals):
-    tournament = random.sample(range(len(individuals)), TOURNAMENT_K)
-    tournament.sort(key=lambda ind: individuals[ind].fitness)
+    tournament = random.sample(range(len(individuals)), TOURNAMENT_K) #choosing K random indices
+    tournament.sort(key=lambda ind: individuals[ind].fitness) #sorting the corresponding individuals
     for i in range(TOURNAMENT_K):
-        if random.random() < TOURNAMENT_P:
+        if random.random() < TOURNAMENT_P: 
             return tournament[i], individuals[tournament[i]].genome
     return tournament[-1], individuals[tournament[-1]].genome
 
-#A function that linearly scales the fitness values (task 10)
+#A function that linearly scales the fitness values (Section 10)
 def linear_scaling(individuals, a,b):
     scaled_fitness = [a * ind.fitness + b for ind in individuals]
     return scaled_fitness
     
+#A function to increment the age of each individual in the population and remove the old between them
+def aging(population):
+    for ind in population.individuals:
+        ind.age += 1
+    population.individuals = [ind for ind in population.individuals if ind.age < AGE_LIMIT]
 
 def main(max_time):
     random.seed(time.time())
@@ -485,7 +515,7 @@ def main(max_time):
         mate(population, buffer, GA_TARGET)
 
         #Updating the population of the next generation
-        population.individuals, buffer = buffer, population.individuals
+        population.individuals = buffer
 
     #Final values of time 
     end_wall_time = time.time()
