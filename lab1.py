@@ -17,7 +17,13 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 CROSSOVER_TYPE = "UNIFORM"
 
 #Fitness mode (options: DISTANCE, LCS)
-FITNESS_MODE = "DISTANCE"
+FITNESS_MODE = "LCS"
+
+#Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
+PARENT_SELECTION_METHOD = "RWS"
+#Tournament selection K,P factors
+TOURNAMENT_K = 5
+TOURNAMENT_P = 0.8
 
 #Individual class representing a single solution
 class Individual:
@@ -232,13 +238,30 @@ def mate(population, buffer, target):
 
     select_count = [0] * pop_size #tracking the number of times each individual is chosen as a parent
 
+    parents = [] #used to store the selected parents if SUS method is used
     for i in range(esize, pop_size):
         
         #Selecting two random parents from the top half of the population
-        i1 = random.randint(0, pop_size // 2 - 1)
-        i2 = random.randint(0, pop_size // 2 - 1)
-        p1 = population.individuals[i1].genome
-        p2 = population.individuals[i2].genome
+        if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
+            i1, p1 = top_half_uniform_selection(population)
+            i2, p2 = top_half_uniform_selection(population)
+        elif PARENT_SELECTION_METHOD == "RWS":
+            i1, p1 = rws_selection(population.individuals)
+            i2, p2 = rws_selection(population.individuals)
+        elif PARENT_SELECTION_METHOD == "SUS":
+            if not parents:
+                parents = sus_selection(population.individuals, 2)
+            i1, p1 = parents[0]
+            i2, p2 = parents[1]
+            parents = parents[2:] #removing the two chosen parents from the list
+        elif PARENT_SELECTION_METHOD == "TOURNAMENT_DET":
+            i1, p1 = tournament_selection_deter(population.individuals)
+            i2, p2 = tournament_selection_deter(population.individuals)
+        elif PARENT_SELECTION_METHOD == "TOURNAMENT_STOCH":
+            i1, p1 = tournament_selection_stoch(population.individuals)
+            i2, p2 = tournament_selection_stoch(population.individuals)
+        else:
+            raise ValueError("Invalid parent selection method")
 
         #Creating a child using the crossover function and inserting it into the buffer
         if CROSSOVER_TYPE == "SINGLE":
@@ -260,7 +283,6 @@ def mate(population, buffer, target):
         #Updating the number of times each individual is chosen as a parent
         select_count[i1] += 1
         select_count[i2] += 1
-    
     #computing the variance of selecting probability
     fitness_var = fitness_variance(select_count, pop_size) 
     population.generation_fitness_var.append(fitness_var) 
@@ -342,6 +364,77 @@ def shannon_entropy(individuals):
             total_chars += 1
     entropy = -sum((count / total_chars) * math.log2(count / total_chars) for count in char_counts.values() if count > 0)
     return entropy
+
+#A function that selects a parent using Top Half Uniform  
+def top_half_uniform_selection(population):
+    rand = random.randint(0, population.size // 2 - 1)
+    return rand, population.individuals[rand].genome
+
+#A function that selects a parent using RWS (section 10)
+def rws_selection(individuals):
+    max_fitness = max(ind.fitness for ind in individuals)
+    scaled_fitnesses = linear_scaling(individuals, -1, max_fitness)
+    total_scaled = sum(scaled_fitnesses)
+    selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
+    if total_scaled == 0:
+        random_choice = random.randint(0, len(individuals) - 1)
+        return random_choice, individuals[random_choice].genome
+    
+    cumulative_probs = []
+    cumsum = 0
+    for prob in selection_probs:
+        cumsum += prob
+        cumulative_probs.append(cumsum)
+    
+    pick = random.random()
+    for i, prob in enumerate(cumulative_probs):
+        if pick < prob:
+            return i, individuals[i].genome
+    return len(individuals) - 1, individuals[-1].genome 
+
+#A function that selects a list of parents using SUS (Section 10)
+def sus_selection(individuals, num_parents):
+    max_fitness = max(ind.fitness for ind in individuals)
+    scaled_fitness = linear_scaling(individuals, -1, max_fitness)
+    total_fitness = sum(scaled_fitness)
+    selection_probs = [fit / total_fitness for fit in scaled_fitness]
+    
+    cumulative_probs = []
+    cumsum = 0
+    for prob in selection_probs:
+        cumsum += prob
+        cumulative_probs.append(cumsum)
+    
+    rand = random.random() / num_parents
+    parents = []
+    for i in range(num_parents):
+        target = rand + i / num_parents
+        for j, prob in enumerate(cumulative_probs):
+            if target < prob:
+                parents.append((j, individuals[j].genome))
+                break
+    return parents
+
+#A function that selects a parent using Deterministic Tournament Selection
+def tournament_selection_deter(individuals):
+    tournament = random.sample(range(len(individuals)), TOURNAMENT_K)    
+    tournament.sort(key=lambda ind: individuals[ind].fitness)
+    return tournament[0], individuals[tournament[0]].genome
+
+#A function that selects a parent using Stochastic Tournament Selection
+def tournament_selection_stoch(individuals):
+    tournament = random.sample(range(len(individuals)), TOURNAMENT_K)
+    tournament.sort(key=lambda ind: individuals[ind].fitness)
+    for i in range(TOURNAMENT_K):
+        if random.random() < TOURNAMENT_P:
+            return tournament[i], individuals[tournament[i]].genome
+    return tournament[-1], individuals[tournament[-1]].genome
+
+#A function that linearly scales the fitness values (task 10)
+def linear_scaling(individuals, a,b):
+    scaled_fitness = [a * ind.fitness + b for ind in individuals]
+    return scaled_fitness
+    
 
 def main(max_time):
     random.seed(time.time())
