@@ -3,18 +3,20 @@ import time
 import math
 import matplotlib.pyplot as plt
 import sys
+import os
+import json
 
 #GA Parameters
-GA_POPSIZE       = 8192     #Population size
-GA_MAXITER       = 120    #Maximum number of iterations
-GA_ELITRATE      = 0.05     #Elitism rate
-GA_MUTATIONRATE  = 0.25     #Mutation rate
-GA_TARGET        = [[7, 0, 7], [7, 0, 7], [7, 7, 0]] #Target string
-GA_CHARSIZE      = 90       #Range of characters (roughly ' ' to '~')
+GA_POPSIZE       = 8192    #Population size
+GA_MAXITER       = 120     #Maximum number of iterations
+GA_ELITRATE      = 0.05    #Elitism rate
+GA_MUTATIONRATE  = 0.25    #Mutation rate
+GA_TARGET        = "Hello world!" #Target string
+GA_CHARSIZE      = 90      #Range of characters (roughly ' ' to '~')
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Problem (TARGET_STRING, MATRIX_TRANSFORM)
-PROBLEM = "MATRIX_TRANSFORM" 
+PROBLEM = "TARGET_STRING" 
 
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
 CROSSOVER_TYPE = "UNIFORM"
@@ -26,8 +28,8 @@ FITNESS_MODE = "LCS"
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
 #Tournament Parameters
-TOURNAMENT_K = 7
-TOURNAMENT_P = 0.8
+TOURNAMENT_K = 16
+TOURNAMENT_P = 0.94
 
 #Survivor selection method (STANDARD, AGING)
 SURVIVOR_SELECTION_METHOD = "STANDARD"
@@ -85,10 +87,10 @@ class Individual:
 
 #Population class representing a collection of individuals
 class Population:
-    def __init__(self, size, target):
+    def __init__(self, size, target, initial_genome):
         self.size = size
         self.target = target if PROBLEM == "TARGET_STRING" else self.matrix_to_string(target)
-        self.individuals = self.init_population()
+        self.individuals = self.init_population(initial_genome)
         self.best_fitness_list = []
         self.avg_fitness_list = []
         self.worst_fitness_list = []
@@ -100,16 +102,22 @@ class Population:
         self.shannon_entropy_list = []
 
     #A function to initialize the population with random individuals
-    def init_population(self):
+    def init_population(self, initial_genome):
         tsize = len(self.target)
         population = []
-        for _ in range(self.size):
-            if PROBLEM == "TARGET_STRING":
-                genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
-            elif PROBLEM == "MATRIX_TRANSFORM":
-                genome = ''.join(str(random.randint(0, 9)) for _ in range(tsize))
-            individual = Individual(genome)
-            population.append(individual)
+        if initial_genome is not None:
+            genome = initial_genome if isinstance(initial_genome, str) else self.matrix_to_string(initial_genome)
+            for _ in range(self.size):
+                individual = Individual(genome)
+                population.append(individual)
+        else:
+            for _ in range(self.size):
+                if PROBLEM == "TARGET_STRING":
+                    genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
+                elif PROBLEM == "MATRIX_TRANSFORM":
+                    genome = ''.join(str(random.randint(0, 9)) for _ in range(tsize))
+                individual = Individual(genome)
+                population.append(individual)
         return population
 
     #A function to update the fitness of all individuals in the population
@@ -504,11 +512,11 @@ def aging(population):
         ind.age += 1
     population.individuals = [ind for ind in population.individuals if ind.age < AGE_LIMIT]
 
-def main(max_time):
+def main(max_time, initial):
     random.seed(time.time())
 
     #Initializing the population and buffer
-    population = Population(GA_POPSIZE, GA_TARGET) 
+    population = Population(GA_POPSIZE, GA_TARGET, initial)
     buffer = [ind for ind in population.individuals] 
 
     #Initializing the CPU and elapsed time
@@ -577,9 +585,56 @@ def main(max_time):
     population.plot_diversity()
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python your_script.py <max_time_in_seconds>")
+    
+    initial = None
+    
+    #Check validity of the number of arguments
+    if len(sys.argv) < 2 or len(sys.argv) > 5:
+        print("Error: Invalid number of arguments.")        
+        print("Usage:")
+        print("  python script.py <max_time>")
+        print("  python script.py <max_time> <target_individual")
+        print("  python script.py <max_time> <initial_individual> <target_individual>")
+        print("  python script.py <max_time> <json_file>")
         sys.exit(1)
+
+    #The case in which initial and target given explicitly as arguments
+    if len(sys.argv) == 4:  
+        initial = sys.argv[2]
+        target = sys.argv[3]
+
+        #Convert the initial and target matrices to strings if they are not
+        if not isinstance(initial, str):
+            initial = "".join(str(num) for num in initial)
+        if not isinstance(target, str):
+            target = "".join(str(num) for num in target)
+            PROBLEM = "MATRIX_TRANSFORM" 
+        
+        GA_TARGET = target #updating the target variable
+
+    elif len(sys.argv) == 3:
+        sec_arg = sys.argv[2]
+
+        #The case in which initial and target given inside a JSON file
+        if os.path.exists(sec_arg) and sec_arg.endswith('.json'):
+            with open(sec_arg, 'r') as file:
+                data = json.load(file)
+                initial = data["test"][0].get("input")
+                target = data["test"][0].get("output")
+
+            #Convert the initial and target matrices to strings
+            initial = "".join(str(num) for row in initial for num in row)
+            GA_TARGET = "".join(str(num) for row in target for num in row)
+            PROBLEM = "MATRIX_TRANSFORM" 
+
+        #The case in which only target given as argument
+        else:
+            if not isinstance(sec_arg, str):
+                sec_arg = "".join(str(num) for num in sec_arg)
+                PROBLEM = "MATRIX_TRANSFORM"
+            GA_TARGET = sec_arg
+
+    #Extracting the maximum time for the algorithm to run
     try:
         max_time = float(sys.argv[1])
         if max_time <= 0:
@@ -587,4 +642,5 @@ if __name__ == "__main__":
     except ValueError:
         print("Error: max_time must be a positive number.")
         sys.exit(1)
-    main(max_time)
+
+    main(max_time, initial)
