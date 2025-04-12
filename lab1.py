@@ -9,9 +9,12 @@ GA_POPSIZE       = 8192     #Population size
 GA_MAXITER       = 120    #Maximum number of iterations
 GA_ELITRATE      = 0.05     #Elitism rate
 GA_MUTATIONRATE  = 0.25     #Mutation rate
-GA_TARGET        = "Hello world!" #Target string
+GA_TARGET        = [[7, 0, 7], [7, 0, 7], [7, 7, 0]] #Target string
 GA_CHARSIZE      = 90       #Range of characters (roughly ' ' to '~')
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
+
+#Problem (TARGET_STRING, MATRIX_TRANSFORM)
+PROBLEM = "MATRIX_TRANSFORM" 
 
 #Crossover mode (options: SINGLE, TWO, UNIFORM)
 CROSSOVER_TYPE = "UNIFORM"
@@ -20,7 +23,7 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
 #Tournament Parameters
 TOURNAMENT_K = 7
@@ -84,7 +87,7 @@ class Individual:
 class Population:
     def __init__(self, size, target):
         self.size = size
-        self.target = target
+        self.target = target if PROBLEM == "TARGET_STRING" else self.matrix_to_string(target)
         self.individuals = self.init_population()
         self.best_fitness_list = []
         self.avg_fitness_list = []
@@ -101,7 +104,10 @@ class Population:
         tsize = len(self.target)
         population = []
         for _ in range(self.size):
-            genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
+            if PROBLEM == "TARGET_STRING":
+                genome = ''.join(chr(random.randint(32, 32 + GA_CHARSIZE - 1)) for _ in range(tsize))
+            elif PROBLEM == "MATRIX_TRANSFORM":
+                genome = ''.join(str(random.randint(0, 9)) for _ in range(tsize))
             individual = Individual(genome)
             population.append(individual)
         return population
@@ -131,9 +137,12 @@ class Population:
         variance  = sum((ind.fitness - avg_fit)**2 for ind in self.individuals) / self.size
         std_dev   = math.sqrt(variance) if variance>0 else 0
         
+        best_ind = self.individuals[0].genome if PROBLEM == "TARGET_STRING" else self.string_to_matrix(self.individuals[0].genome) 
+        worst_ind = self.individuals[-1].genome if PROBLEM == "TARGET_STRING" else self.string_to_matrix(self.individuals[-1].genome)
+
         print(f"Gen{generation}." 
-                f" Best: {self.individuals[0].genome} ({best_fit})", 
-                f" Worst: {self.individuals[-1].genome} ({worst_fit}) ",
+                f" Best: {best_ind} ({best_fit})", 
+                f" Worst: {worst_ind} ({worst_fit}) ",
                 f" Fitness Range: {fitness_range} ",
                 f" Avg: {avg_fit:.2f} ",
                 f" Std: {std_dev:.2f} ")
@@ -194,16 +203,35 @@ class Population:
         plt.grid(True)
         plt.show()
 
+    #A function that transforms a 2D matrix into a string (Section 12)
+    def matrix_to_string(self, matrix):
+        string = []
+        for row in matrix:
+            string.extend(row)
+        return "".join(str(num) for num in string)
+
+    #A function that transforms a string into a 2D matrix (Section 12)
+    def string_to_matrix(self, string):
+        size = int(math.sqrt(len(string)))
+        matrix = []
+        for i in range(size):
+            row = [int(c) for c in string[i * size:(i + 1) * size]]
+            matrix.append(row)
+        return matrix
+
 
 #A function to mutate an individual by changing a random character in its genome
 def mutate(individual):
     tsize = len(individual.genome)
     ipos = random.randint(0, tsize - 1) #choosing a random character 
-    old_char_val = ord(individual.genome[ipos]) #extracting the ASCII value of the character
-    delta = random.randint(32, 32 + GA_CHARSIZE - 1) #choosing a random value to add to the ASCII value
-    new_char_val = (old_char_val + delta) % 126 #modulo 126 to keep it within the ASCII range
-    if new_char_val < 32: 
-        new_char_val += 32
+    if PROBLEM == "TARGET_STRING":
+        old_char_val = ord(individual.genome[ipos]) #extracting the ASCII value of the character
+        delta = random.randint(32, 32 + GA_CHARSIZE - 1) #choosing a random value to add to the ASCII value
+        new_char_val = (old_char_val + delta) % 126 #modulo 126 to keep it within the ASCII range
+        if new_char_val < 32: 
+            new_char_val += 32
+    elif PROBLEM == "MATRIX_TRANSFORM":
+        new_char_val = random.randint(48, 57) #choosing a random value between 0 and 9
 
     #Updating the genome with the new character instead of the old one
     genome_list = list(individual.genome)
@@ -522,7 +550,7 @@ def main(max_time):
             break
 
         #Mating the population
-        mate(population, buffer, GA_TARGET)
+        mate(population, buffer, population.target)
 
         #Updating the population of the next generation
         population.individuals = buffer
