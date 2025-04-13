@@ -25,7 +25,7 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
+PARENT_SELECTION_METHOD = "RWS"
 
 #Tournament Parameters
 TOURNAMENT_K = 18
@@ -459,6 +459,8 @@ def sus_selection(individuals, num_parents):
 
     #Converting fitness values to probabilities
     total_fitness = sum(scaled_fitness)
+    if total_fitness == 0:
+        return random.choices([(i, ind.genome) for i, ind in enumerate(individuals)],k=num_parents)
     selection_probs = [fit / total_fitness for fit in scaled_fitness]
     
     #Building the "roulete"
