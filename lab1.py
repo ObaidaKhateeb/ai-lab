@@ -25,10 +25,10 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
+PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
 
 #Tournament Parameters
-TOURNAMENT_K = 16
+TOURNAMENT_K = 18
 TOURNAMENT_P = 0.81
 
 #Survivor selection method (STANDARD, AGING)
@@ -482,13 +482,13 @@ def sus_selection(individuals, num_parents):
 #A function that selects a parent using Deterministic Tournament Selection (Section 10)
 def tournament_selection_deter(individuals):
     tournament = random.sample(range(len(individuals)), TOURNAMENT_K) #choosing K random indices 
-    tournament.sort(key=lambda ind: individuals[ind].fitness) #sorting the corresponding individuals
+    tournament.sort(key=lambda ind: individuals[ind].rank) #sorting the corresponding individuals
     return tournament[0], individuals[tournament[0]].genome
 
 #A function that selects a parent using Stochastic Tournament Selection (Section 10)
 def tournament_selection_stoch(individuals):
     tournament = random.sample(range(len(individuals)), TOURNAMENT_K) #choosing K random indices
-    tournament.sort(key=lambda ind: individuals[ind].fitness) #sorting the corresponding individuals
+    tournament.sort(key=lambda ind: individuals[ind].rank) #sorting the corresponding individuals
     for i in range(TOURNAMENT_K):
         if random.random() < TOURNAMENT_P: 
             return tournament[i], individuals[tournament[i]].genome
