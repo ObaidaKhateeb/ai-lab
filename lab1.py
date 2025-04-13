@@ -7,7 +7,7 @@ import os
 import json
 
 #GA Parameters
-GA_POPSIZE       = 8192    #Population size
+GA_POPSIZE       = 2048    #Population size
 GA_MAXITER       = 120     #Maximum number of iterations
 GA_ELITRATE      = 0.05    #Elitism rate
 GA_MUTATIONRATE  = 0.25    #Mutation rate
@@ -25,10 +25,10 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "RWS"
+PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
 
 #Tournament Parameters
-TOURNAMENT_K = 18
+TOURNAMENT_K = 46
 TOURNAMENT_P = 0.81
 
 #Survivor selection method (STANDARD, AGING)
