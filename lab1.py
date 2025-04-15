@@ -530,7 +530,7 @@ def shannon_entropy(individuals):
 
 #A function that selects a parent using Top Half Uniform  
 def top_half_uniform_selection(population):
-    rand = random.randint(0, population.size // 2 - 1)
+    rand = random.randint(0, len(population.individuals) // 2 - 1)
     return rand, population.individuals[rand].genome
 
 #A function that selects a parent using RWS (section 10)
