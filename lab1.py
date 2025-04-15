@@ -15,25 +15,25 @@ GA_TARGET        = "Hello world!" #Target string
 GA_CHARSIZE      = 90      #Range of characters (roughly ' ' to '~')
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
-#Problem (TARGET_STRING, MATRIX_TRANSFORM)
+#Problem (TARGET_STRING, MATRIX_TRANSFORM, BIN_PACKING)
 PROBLEM = "TARGET_STRING" 
 
-#Crossover mode (options: SINGLE, TWO, UNIFORM)
+#Crossover mode (options: SINGLE, TWO, UNIFORM, NO_CROSSOVER)
 CROSSOVER_TYPE = "UNIFORM"
 
-#Fitness mode (options: DISTANCE, LCS)
+#Fitness mode (options: DISTANCE, LCS, BINS_DIFF)
 FITNESS_MODE = "LCS"
 
-#Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
+#Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH, SHUFFLE)
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
 
 #Tournament Parameters
-TOURNAMENT_K = 46
-TOURNAMENT_P = 0.81
+TOURNAMENT_K = 49
+TOURNAMENT_P = 0.86
 
 #Survivor selection method (STANDARD, AGING)
 SURVIVOR_SELECTION_METHOD = "STANDARD"
-AGE_LIMIT = 15
+AGE_LIMIT = 14
 
 #Individual class representing a single solution
 class Individual:
@@ -49,6 +49,8 @@ class Individual:
             self.fitness = sum(abs(ord(g) - ord(t)) for g, t in zip(self.genome, target))
         elif FITNESS_MODE == "LCS":
             self.fitness = self.fitness_by_lcs(self.genome, target)
+        elif FITNESS_MODE == "BINS_DIFF":
+            self.fitness = self.fitness_by_bins(self.genome, target)
         else:
             raise ValueError("Invalid fitness mode")
 
@@ -83,14 +85,78 @@ class Individual:
                 n -= 1
         max_possible = (bonus+1) * len(b)
         return max_possible - (lcs_length + bonus * correct_chars_count)
+    
+    def fitness_by_bins(self, genome, target):
+        return len(genome) - target
+    
+    def genome_rearrange(self, initial_genome, bin_capacity):
+        random.shuffle(initial_genome)
+        genome = []
+        for item in [item for bin in initial_genome for item in bin]:
+            best_bin_index = -1
+            min_space_left = bin_capacity+ 1
+            for i, bin in enumerate(genome):
+                space_left = bin_capacity - sum(bin)
+                if space_left >= item and space_left - item < min_space_left:
+                    best_bin_index = i
+                    min_space_left = space_left - item
+            if best_bin_index == -1:
+                genome.append([item])
+            else:
+                genome[best_bin_index].append(item)
+        return genome
+    
+
+    def genome_rearrange2(self, initial_genome, bin_capacity):
+        # Flatten all items
+        all_bins = [list(bin) for bin in initial_genome]  # Deep copy
+        bin_loads = [(sum(b), idx) for idx, b in enumerate(all_bins)]
+        
+        # Sort bins by total content (descending)
+        bin_loads.sort(reverse=True)
+
+        # Determine top 50% bins to keep
+        keep_count = len(bin_loads) // 2
+        keep_indices = set(idx for _, idx in bin_loads[:keep_count])
+
+        kept_bins = []
+        repack_items = []
+
+        for i, bin in enumerate(all_bins):
+            if i in keep_indices:
+                kept_bins.append(list(bin))  # preserve bin
+            else:
+                repack_items.extend(bin)     # collect items to repack
+
+        # Shuffle items to repack
+        random.shuffle(repack_items)
+
+        # Try best-fit packing repack_items into kept_bins
+        for item in repack_items:
+            best_bin_index = -1
+            min_space_left = bin_capacity + 1
+
+            for i, bin in enumerate(kept_bins):
+                space_left = bin_capacity - sum(bin)
+                if space_left >= item and space_left - item < min_space_left:
+                    best_bin_index = i
+                    min_space_left = space_left - item
+
+            if best_bin_index == -1:
+                kept_bins.append([item])  # new bin
+            else:
+                kept_bins[best_bin_index].append(item)
+
+        return kept_bins
 
 
 #Population class representing a collection of individuals
 class Population:
-    def __init__(self, size, target, initial_genome):
+    def __init__(self, size, target, initial_genome, bin_capacity = None):
         self.size = size
-        self.target = target if PROBLEM == "TARGET_STRING" else self.matrix_to_string(target)
-        self.individuals = self.init_population(initial_genome)
+        self.target = target if PROBLEM == "TARGET_STRING" or PROBLEM == "BIN_PACKING" else self.matrix_to_string(target)
+        self.bin_capacity = bin_capacity
+        self.individuals = self.init_population(initial_genome) if PROBLEM == "TARGET_STRING" or PROBLEM == "MATRIX_TRANSFORM" else self.bin_packing_init_population(initial_genome)
         self.best_fitness_list = []
         self.avg_fitness_list = []
         self.worst_fitness_list = []
@@ -100,6 +166,7 @@ class Population:
         self.avg_dist_list = [] 
         self.distinct_alleles_list = [] 
         self.shannon_entropy_list = []
+
 
     #A function to initialize the population with random individuals
     def init_population(self, initial_genome):
@@ -118,6 +185,15 @@ class Population:
                     genome = ''.join(str(random.randint(0, 9)) for _ in range(tsize))
                 individual = Individual(genome)
                 population.append(individual)
+        return population
+
+    def bin_packing_init_population(self, initial_genome):
+        population = []
+        for _ in range(self.size):
+            individual = Individual(initial_genome)
+            genome = individual.genome_rearrange(initial_genome, self.bin_capacity)
+            individual.genome = genome
+            population.append(individual)
         return population
 
     #A function to update the fitness of all individuals in the population
@@ -143,10 +219,15 @@ class Population:
         sum_fit   = sum(ind.fitness for ind in self.individuals)
         avg_fit   = sum_fit / self.size
         variance  = sum((ind.fitness - avg_fit)**2 for ind in self.individuals) / self.size
-        std_dev   = math.sqrt(variance) if variance>0 else 0
-        
-        best_ind = self.individuals[0].genome if PROBLEM == "TARGET_STRING" else self.string_to_matrix(self.individuals[0].genome) 
-        worst_ind = self.individuals[-1].genome if PROBLEM == "TARGET_STRING" else self.string_to_matrix(self.individuals[-1].genome)
+        std_dev   = math.sqrt(variance) if variance>0 else 0     
+
+        if PROBLEM == "BIN_PACKING":
+            best_fit += GA_TARGET
+            worst_fit += GA_TARGET
+            avg_fit += GA_TARGET
+
+        best_ind = self.individuals[0].genome if PROBLEM == "TARGET_STRING" or PROBLEM == "BIN_PACKING" else self.string_to_matrix(self.individuals[0].genome)
+        worst_ind = self.individuals[-1].genome if PROBLEM == "TARGET_STRING" or PROBLEM == "BIN_PACKING" else self.string_to_matrix(self.individuals[-1].genome)
 
         print(f"Gen{generation}." 
                 f" Best: {best_ind} ({best_fit})", 
@@ -311,6 +392,9 @@ def mate(population, buffer, target):
             individuals_ranked = fitness_ranking(population.individuals)
             i1, p1 = tournament_selection_stoch(individuals_ranked)
             i2, p2 = tournament_selection_stoch(individuals_ranked)
+        elif PARENT_SELECTION_METHOD == "SHUFFLE":
+            child_genome = population.individuals[i].genome_rearrange2(population.individuals[i].genome, population.bin_capacity)
+            population.individuals[i].genome = child_genome
         else:
             raise ValueError("Invalid parent selection method")
 
@@ -321,19 +405,23 @@ def mate(population, buffer, target):
             child_genome = two_point_crossover(p1, p2)
         elif CROSSOVER_TYPE == "UNIFORM":
             child_genome = uniform_crossover(p1, p2)
-        else:
+        elif not CROSSOVER_TYPE == "NO_CROSSOVER":
             raise ValueError("Invalid crossover type")
 
         buffer[i] = Individual(child_genome)
         buffer[i].calculate_fitness(target)
 
         #Mutating the child with a GA_MUTATIONRATE probability
-        if random.random() < GA_MUTATIONRATE:
+        if random.random() < GA_MUTATIONRATE and PROBLEM != "BIN_PACKING":
             mutate(buffer[i])
 
         #Updating the number of times each individual is chosen as a parent
-        select_count[i1] += 1
-        select_count[i2] += 1
+        if PROBLEM != "BIN_PACKING":
+            select_count[i1] += 1
+            select_count[i2] += 1
+        else:
+            select_count[i] += 1
+
     #computing the variance of selecting probability
     fitness_var = fitness_variance(select_count, pop_size) 
     population.generation_fitness_var.append(fitness_var) 
@@ -342,12 +430,13 @@ def mate(population, buffer, target):
     population.top_avg_select_ratio.append(top_avg)
 
     #computing the genetic diversity of the population 
-    distance_avg = distance_average(population.individuals)
-    distinct_alleles_count = distinct_alleles(population.individuals)
-    shannon_entropy_value = shannon_entropy(population.individuals)
-    population.avg_dist_list.append(distance_avg)
-    population.distinct_alleles_list.append(distinct_alleles_count)
-    population.shannon_entropy_list.append(shannon_entropy_value)
+    if PROBLEM != "BIN_PACKING":
+        distance_avg = distance_average(population.individuals)
+        distinct_alleles_count = distinct_alleles(population.individuals)
+        shannon_entropy_value = shannon_entropy(population.individuals)
+        population.avg_dist_list.append(distance_avg)
+        population.distinct_alleles_list.append(distinct_alleles_count)
+        population.shannon_entropy_list.append(shannon_entropy_value)
 
 #A method that computes and prints the CPU time and elapsed time (task 2)
 def time_compute(start_cpu_time, start_wall_time):
@@ -514,11 +603,32 @@ def aging(population):
         ind.age += 1
     population.individuals = [ind for ind in population.individuals if ind.age < AGE_LIMIT]
 
+def first_fit(genome, bin_capacity):
+    bins = []
+    for item in genome:
+        placed = False
+        for bin in bins:
+            if sum(bin) + item <= bin_capacity:
+                bin.append(item)
+                placed = True
+                break
+        if not placed:
+            bins.append([item])
+    return bins
+
+
 def main(max_time, initial):
     random.seed(time.time())
 
     #Initializing the population and buffer
-    population = Population(GA_POPSIZE, GA_TARGET, initial)
+    if PROBLEM == "TARGET_STRING" or PROBLEM == "MATRIX_TRANSFORM":
+        population = Population(GA_POPSIZE, GA_TARGET, initial)
+    elif PROBLEM == "BIN_PACKING":
+        bin_capacity = int(initial[0])
+        target = int(initial[1])
+        initial_genome = [[item] for item in initial[2]]
+        population = Population(GA_POPSIZE, target, initial_genome, bin_capacity)
+
     buffer = [ind for ind in population.individuals] 
 
     #Initializing the CPU and elapsed time
@@ -528,8 +638,8 @@ def main(max_time, initial):
     #Variables to detect convergence
     best_fit_so_far = float('inf')
     no_improvement_count = 0
-
     for generation in range(GA_MAXITER):
+
         #Updating the fitness of the population and sorting its population
         population.update_fitness()
         population.sort_by_fitness()
@@ -584,7 +694,8 @@ def main(max_time, initial):
     population.plot_selection_pressure()
 
     #Plotting the genetic diversity of the population over generations (task 9)
-    population.plot_diversity()
+    if PROBLEM != "BIN_PACKING":
+        population.plot_diversity()
 
 if __name__ == "__main__":
     
@@ -595,7 +706,7 @@ if __name__ == "__main__":
         print("Error: Invalid number of arguments.")        
         print("Usage:")
         print("  python script.py <max_time>")
-        print("  python script.py <max_time> <target_individual")
+        print("  python script.py <max_time> <target_individual>")
         print("  python script.py <max_time> <initial_individual> <target_individual>")
         print("  python script.py <max_time> <json_file>")
         sys.exit(1)
@@ -628,6 +739,22 @@ if __name__ == "__main__":
             initial = "".join(str(num) for row in initial for num in row)
             GA_TARGET = "".join(str(num) for row in target for num in row)
             PROBLEM = "MATRIX_TRANSFORM" 
+
+        #The case in which initial and target given inside a text file
+        elif os.path.exists(sec_arg) and sec_arg.endswith('.txt'):
+            with open(sec_arg, 'r') as file:
+                PROBLEM = "BIN_PACKING"
+                PARENT_SELECTION_METHOD = "SHUFFLE"
+                CROSSOVER_TYPE = "NO_CROSSOVER"
+                FITNESS_MODE = "BINS_DIFF"
+                lines = file.readlines()
+                input = lines[2].strip().split() #extracting the number of items, bin size, and optimal solution
+                initial = [int(input[0]), int(input[2])]
+                items = []
+                GA_TARGET = int(input[2])
+                for line in lines[3: (3 + int(input[1]))]:
+                    items.append(int(line.strip()))
+                initial.append(items)
 
         #The case in which only target given as argument
         else:
