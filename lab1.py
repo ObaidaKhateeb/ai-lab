@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import sys
 import os
 import json
+import tkinter as tk
+from tkinter import filedialog
 
 #GA Parameters
 GA_POPSIZE       = 2048    #Population size
@@ -238,12 +240,24 @@ class Population:
         best_ind = self.individuals[0].genome if PROBLEM == "TARGET_STRING" or PROBLEM == "BIN_PACKING" else self.string_to_matrix(self.individuals[0].genome)
         worst_ind = self.individuals[-1].genome if PROBLEM == "TARGET_STRING" or PROBLEM == "BIN_PACKING" else self.string_to_matrix(self.individuals[-1].genome)
 
-        print(f"Gen{generation}." 
-                f" Best: {best_ind} ({best_fit})", 
-                f" Worst: {worst_ind} ({worst_fit}) ",
-                f" Fitness Range: {fitness_range} ",
-                f" Avg: {avg_fit:.2f} ",
-                f" Std: {std_dev:.2f} ")
+        if PROBLEM == "TARGET_STRING":
+            print(f"Gen{generation}." 
+                    f" Best: {best_ind} ({best_fit})", 
+                    f" Worst: {worst_ind} ({worst_fit}) ",
+                    f" Fitness Range: {fitness_range} ",
+                    f" Avg: {avg_fit:.2f} ",
+                    f" Std: {std_dev:.2f} ")
+        else:
+            print(f"Gen{generation}.") 
+            print(f" Best: ")
+            print(f"  {best_ind} ({best_fit})")
+            print(f" Worst: ")
+            print(f"  {worst_ind} ({worst_fit}) ")
+            print(f" Fitness Range: {fitness_range} "
+                    f" Avg: {avg_fit:.2f} "
+                    f" Std: {std_dev:.2f} ")
+
+
 
         #Storing the best, average, and worst fitness for line plots use (task 3a)
         self.best_fitness_list.append(best_fit)
@@ -692,8 +706,88 @@ def main(max_time, initial):
     if PROBLEM != "BIN_PACKING":
         population.plot_diversity()
 
+#A function to ask the user for the parameters of the algorithm (used in EXE)
+def interactive():
+    global CROSSOVER_TYPE, FITNESS_MODE, PARENT_SELECTION_METHOD
+
+    def ask_choice(prompt, options, default_value):
+        print("")
+        print(f"{prompt}")
+        for i, opt in enumerate(options, 1):
+            print(f"  {i}. {opt}")
+        while True:
+            choice = input("Choose one of the options or Enter for default: ").strip()
+            if choice == "":
+                print(f"Using default: {default_value}")
+                return default_value
+            elif choice in [str(i) for i in range(1, len(options) + 1)]:
+                print(f"Selected: {options[int(choice)-1]}")
+                return options[int(choice)-1]
+            else:
+                print("Invalid choice. Please enter one of the options or press Enter.")
+
+    CROSSOVER_TYPE = ask_choice("Select crossover type:", ["SINGLE", "TWO", "UNIFORM"], CROSSOVER_TYPE)
+    FITNESS_MODE = ask_choice("Select fitness mode:", ["DISTANCE", "LCS", "BINS_DIFF"], FITNESS_MODE)
+    PARENT_SELECTION_METHOD = ask_choice("Select parent selection method:", ["TOP_HALF_UNIFORM", "RWS", "SUS", "TOURNAMENT_DET", "TOURNAMENT_STOCH"], PARENT_SELECTION_METHOD)
+
+    #Asking the user to enter the maximum time it wants the algorithm to run
+    print("")
+    print("Enter the maximum time for the algorithm to run (in secs):")
+    max_time = input("Max time: ").strip()
+    while True:
+        try:
+            max_time = float(max_time)
+            if max_time <= 0:
+                raise ValueError
+            break
+        except ValueError:
+            print("Invalid input. Please enter a positive number.")
+            max_time = input("Max time: ").strip()
+    sys.argv.append(max_time)
+
+    #Asking the user whether it would like to enter the initial genome/matrix or read it from a file or to use the default
+    print("")
+    print("Would you like to enter the initial genome/matrix or read it from a file?")
+    print("  1. Enter manually")
+    print("  2. Read from a file")
+    while True:
+        choice = input("Choose 1/2 or Enter for default: ").strip()
+        if choice == "1":
+            print("")
+            initial = input("Enter initial genome/matrix (or Enter if there's none): ").strip()
+            if initial != "":
+                sys.argv.append(initial)
+            print("")
+            target = input("Enter target genome/matrix (or Enter for default): ").strip()
+            if target != "":
+                sys.argv.append(target)
+            break
+
+        elif choice == "2":
+            print("")
+            while True:
+                file_path = input("Enter path: ").strip()
+                if file_path:
+                    if not (file_path.endswith(".txt") or file_path.endswith(".json") or file_path.endswith(".jsonl")):
+                        print("Invalid file format. Only txt or JSON supported. Please try again.")
+                    elif not os.path.isfile(file_path):
+                        print(f"File {file_path} not found. Please try again.")
+                    else:
+                        sys.argv.append(file_path)
+                        break
+            break
+
+        elif choice == "":
+            break
+
+        else:
+            print("Invalid choice. Please enter 1/2/Enter")
+            
+
 if __name__ == "__main__":
     
+    #interactive()
+
     initial = None
     
     #Check validity of the number of arguments
@@ -711,52 +805,65 @@ if __name__ == "__main__":
         initial = sys.argv[2]
         target = sys.argv[3]
 
-        #Convert the initial and target matrices to strings if they are not
-        if not isinstance(initial, str):
-            initial = "".join(str(num) for num in initial)
-        if not isinstance(target, str):
-            target = "".join(str(num) for num in target)
-            PROBLEM = "MATRIX_TRANSFORM" 
-        
-        GA_TARGET = target #updating the target variable
+        if FITNESS_MODE == "BINS_DIFF": #dealing with the case where the user chose a not suitable fitness mode
+            FITNESS_MODE = "LCS"
 
     elif len(sys.argv) == 3:
         sec_arg = sys.argv[2]
 
         #The case in which initial and target given inside a JSON file
-        if os.path.exists(sec_arg) and sec_arg.endswith('.json'):
-            with open(sec_arg, 'r') as file:
-                data = json.load(file)
-                initial = data["test"][0].get("input")
-                target = data["test"][0].get("output")
+        if os.path.exists(sec_arg) and (sec_arg.endswith('.json') or sec_arg.endswith('.jsonl')):
+            try:
+                with open(sec_arg, 'r') as file:
+                    data = json.load(file)
+                    initial = data["test"][0].get("input")
+                    target = data["test"][0].get("output")
 
-            #Convert the initial and target matrices to strings
-            initial = "".join(str(num) for row in initial for num in row)
-            GA_TARGET = "".join(str(num) for row in target for num in row)
-            PROBLEM = "MATRIX_TRANSFORM" 
+                    if initial is None or target is None:
+                        raise ValueError("Missing 'input' or 'output' in JSON")
+
+                #Convert the initial and target matrices to strings
+                initial = "".join(str(num) for row in initial for num in row)
+                GA_TARGET = "".join(str(num) for row in target for num in row)
+                PROBLEM = "MATRIX_TRANSFORM"
+
+                if FITNESS_MODE == "BINS_DIFF":
+                    FITNESS_MODE = "LCS"
+
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                print(f"Error: JSON doesn't use the required format '{sec_arg}' — {e}")
+                sys.exit(1)
 
         #The case in which initial and target given inside a text file
         elif os.path.exists(sec_arg) and sec_arg.endswith('.txt'):
-            with open(sec_arg, 'r') as file:
-                PROBLEM = "BIN_PACKING"
-                PARENT_SELECTION_METHOD = "SHUFFLE"
-                CROSSOVER_TYPE = "NO_CROSSOVER"
-                FITNESS_MODE = "BINS_DIFF"
-                lines = file.readlines()
-                input = lines[2].strip().split() #extracting the number of items, bin size, and optimal solution
-                initial = [int(input[0]), int(input[2])]
-                items = []
-                GA_TARGET = int(input[2])
-                for line in lines[3: (3 + int(input[1]))]:
-                    items.append(int(line.strip()))
-                initial.append(items)
+            try:
+                with open(sec_arg, 'r') as file:
+                    PROBLEM = "BIN_PACKING"
+                    PARENT_SELECTION_METHOD = "SHUFFLE"
+                    CROSSOVER_TYPE = "NO_CROSSOVER"
+                    FITNESS_MODE = "BINS_DIFF"
+                    
+                    lines = file.readlines()
+                    input = lines[2].strip().split()
+                    
+                    initial = [int(input[0]), int(input[2])]
+                    GA_TARGET = int(input[2])
+                    
+                    items = []
+                    for line in lines[3: (3 + int(input[1]))]:
+                        items.append(int(line.strip()))
+                    initial.append(items)
+
+            except (IndexError, ValueError) as e:
+                print(f"Error: TXT doesn't use the required format '{sec_arg}' — {e}")
+                sys.exit(1)
 
         #The case in which only target given as argument
         else:
-            if not isinstance(sec_arg, str):
-                sec_arg = "".join(str(num) for num in sec_arg)
-                PROBLEM = "MATRIX_TRANSFORM"
             GA_TARGET = sec_arg
+    
+            if FITNESS_MODE == "BINS_DIFF": #dealing with the case where the user chose a not suitable fitness mode
+                FITNESS_MODE = "LCS"
 
     #Extracting the maximum time for the algorithm to run
     try:
