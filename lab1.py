@@ -25,7 +25,7 @@ CROSSOVER_TYPE = "UNIFORM"
 FITNESS_MODE = "LCS"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH, SHUFFLE)
-PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
@@ -77,7 +77,7 @@ class Individual:
             if a[m - 1] == b[n - 1]:
                 m -= 1
                 n -= 1
-                if m == n: #ckecks the LCS genome character is in the right position
+                if m == n: #ckecks if the LCS genome character is in the right position
                     correct_chars_count += 1
             elif L[m - 1][n] > L[m][n - 1]:
                 m -= 1
@@ -86,13 +86,15 @@ class Individual:
         max_possible = (bonus+1) * len(b)
         return max_possible - (lcs_length + bonus * correct_chars_count)
     
+    #A functtion to compute the fitness of the individual in Bin Packing problem
     def fitness_by_bins(self, genome, target):
-        return len(genome) - target
+        return len(genome) - target #Difference between the number of bins used and the number of the target bins
     
-    def genome_rearrange(self, initial_genome, bin_capacity):
+    #A function to create a genome using the best fit algorithm 
+    def best_fit(self, initial_genome, bin_capacity):
         random.shuffle(initial_genome)
         genome = []
-        for item in [item for bin in initial_genome for item in bin]:
+        for item in [item for bin in initial_genome for item in bin]: 
             best_bin_index = -1
             min_space_left = bin_capacity+ 1
             for i, bin in enumerate(genome):
@@ -100,38 +102,44 @@ class Individual:
                 if space_left >= item and space_left - item < min_space_left:
                     best_bin_index = i
                     min_space_left = space_left - item
-            if best_bin_index == -1:
-                genome.append([item])
-            else:
-                genome[best_bin_index].append(item)
+            if best_bin_index == -1: #no suitable bin found
+                genome.append([item]) #creating a new bin
+            else: #adds the item to the best bin found
+                genome[best_bin_index].append(item) 
+
         return genome
     
+    #A function to create a genome using the first fit algorithm
+    def first_fit(self, initial_genome, bin_capacity):
+        random.shuffle(initial_genome)
+        genome = []
+        for item in [item for bin in initial_genome for item in bin]:
+            placed = False
+            for bin in genome:
+                if sum(bin) + item <= bin_capacity: #A suitable bin found
+                    bin.append(item)
+                    placed = True
+                    break
+            if not placed: #no suitable bin found
+                genome.append([item]) #creating a new bin
+        return genome
 
-    def genome_rearrange2(self, initial_genome, bin_capacity):
+    #A function to rearrange the genome by keeping the top 50% bins and repacking the rest
+    def genome_rearrange(self, genome, bin_capacity):
         # Flatten all items
-        all_bins = [list(bin) for bin in initial_genome]  # Deep copy
+        all_bins = [list(bin) for bin in genome] 
         bin_loads = [(sum(b), idx) for idx, b in enumerate(all_bins)]
-        
-        # Sort bins by total content (descending)
-        bin_loads.sort(reverse=True)
+        bin_loads.sort(reverse=True) #sorting the bins by their loads
 
-        # Determine top 50% bins to keep
+        #Determining the bins to keep and items to repack
         keep_count = len(bin_loads) // 2
         keep_indices = set(idx for _, idx in bin_loads[:keep_count])
+        kept_bins = [all_bins[i] for i in range(len(all_bins)) if i in keep_indices]
+        repack_items = [item for i in range(len(all_bins)) if i not in keep_indices for item in all_bins[i]]
 
-        kept_bins = []
-        repack_items = []
+        random.shuffle(repack_items) #shuffling the items to be repacked
 
-        for i, bin in enumerate(all_bins):
-            if i in keep_indices:
-                kept_bins.append(list(bin))  # preserve bin
-            else:
-                repack_items.extend(bin)     # collect items to repack
-
-        # Shuffle items to repack
-        random.shuffle(repack_items)
-
-        # Try best-fit packing repack_items into kept_bins
+        #Re-Packing the items: 
         for item in repack_items:
             best_bin_index = -1
             min_space_left = bin_capacity + 1
@@ -142,9 +150,9 @@ class Individual:
                     best_bin_index = i
                     min_space_left = space_left - item
 
-            if best_bin_index == -1:
-                kept_bins.append([item])  # new bin
-            else:
+            if best_bin_index == -1: #no suitable bin found
+                kept_bins.append([item]) #creating a new bin
+            else: #adds the item to the best bin found
                 kept_bins[best_bin_index].append(item)
 
         return kept_bins
@@ -187,11 +195,12 @@ class Population:
                 population.append(individual)
         return population
 
+    #A function to initialize the population for the Bin Packing problem u
     def bin_packing_init_population(self, initial_genome):
         population = []
         for _ in range(self.size):
             individual = Individual(initial_genome)
-            genome = individual.genome_rearrange(initial_genome, self.bin_capacity)
+            genome = individual.best_fit(initial_genome, self.bin_capacity) #creating a genome using the best fit algorithm
             individual.genome = genome
             population.append(individual)
         return population
@@ -393,7 +402,7 @@ def mate(population, buffer, target):
             i1, p1 = tournament_selection_stoch(individuals_ranked)
             i2, p2 = tournament_selection_stoch(individuals_ranked)
         elif PARENT_SELECTION_METHOD == "SHUFFLE":
-            child_genome = population.individuals[i].genome_rearrange2(population.individuals[i].genome, population.bin_capacity)
+            child_genome = population.individuals[i].genome_rearrange(population.individuals[i].genome, population.bin_capacity)
             population.individuals[i].genome = child_genome
         else:
             raise ValueError("Invalid parent selection method")
@@ -603,19 +612,6 @@ def aging(population):
         ind.age += 1
     population.individuals = [ind for ind in population.individuals if ind.age < AGE_LIMIT]
 
-def first_fit(genome, bin_capacity):
-    bins = []
-    for item in genome:
-        placed = False
-        for bin in bins:
-            if sum(bin) + item <= bin_capacity:
-                bin.append(item)
-                placed = True
-                break
-        if not placed:
-            bins.append([item])
-    return bins
-
 
 def main(max_time, initial):
     random.seed(time.time())
@@ -628,7 +624,6 @@ def main(max_time, initial):
         target = int(initial[1])
         initial_genome = [[item] for item in initial[2]]
         population = Population(GA_POPSIZE, target, initial_genome, bin_capacity)
-
     buffer = [ind for ind in population.individuals] 
 
     #Initializing the CPU and elapsed time
