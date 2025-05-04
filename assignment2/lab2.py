@@ -3,6 +3,7 @@ import math
 import os 
 
 #GA Parameters
+GA_MAXITER = 3000
 GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
@@ -346,7 +347,7 @@ def linear_scaling(individuals, a,b):
     return scaled_fitness
 # -------- Main Runner --------
 
-def main(filepath, pop_size=100, generations=300):
+def main(filepath, pop_size=100):
     #Extracting the coordinates from the file
     coords = read_tsp_file(filepath)
     optimal_distance = read_opt_tour(filepath, coords)
@@ -358,7 +359,7 @@ def main(filepath, pop_size=100, generations=300):
     best_fit_so_far = float('inf')
     no_improvement_count = 0
 
-    for gen in range(generations):
+    for gen in range(GA_MAXITER):
         population.mate()
         best = population.best_individual()
         
@@ -377,7 +378,8 @@ def main(filepath, pop_size=100, generations=300):
     best = population.best_individual()
     print("\nBest tour:")
     print(best.genome)
-    print(f"Total distance: {best.fitness:.2f}")
+    print(f"Best Fitness Achieved: {best.fitness:.2f}")
+    print(f"Best Distance Achieved: {best.fitness + optimal_distance:.2f}")
 
 
 if __name__ == "__main__":
