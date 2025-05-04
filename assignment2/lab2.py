@@ -1,9 +1,11 @@
 import random
 import math
+import os 
 
 #GA Parameters
 GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
+NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH, SHUFFLE)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
@@ -18,9 +20,9 @@ MUTATION_TYPE = "scramble"
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
     coords = []
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r') as file:
         relevant_line = False
-        for line in f:
+        for line in file:
             if "NODE_COORD_SECTION" in line: 
                 relevant_line = True #start reading coordinates beginning from the next line
                 continue
@@ -33,19 +35,48 @@ def read_tsp_file(filepath):
                     coords.append((float(x), float(y)))
     return coords
 
+def read_opt_tour(filepath, coords):
+    opt_path = filepath.replace(".tsp", ".opt.tour")
+
+    if not os.path.exists(opt_path): #check if the optimal tour file exists
+        return None 
+
+    tour = []
+    with open(opt_path, 'r') as file:
+        relevant_line = False
+        for line in file:
+            if "TOUR_SECTION" in line:
+                relevant_line = True
+                continue
+            if "-1" in line or "EOF" in line:
+                break
+            if relevant_line:
+                city_index = int(line.strip()) - 1  #convert to 0-based index
+                tour.append(city_index)
+
+    tour.append(tour[0]) #add the first city to the end of the tour (the return to the starting point)
+
+    #Calculating the total distance of the tour
+    dist_matrix = compute_distance_matrix(coords)
+    total = 0
+    for i in range(len(tour) - 1):
+        total += dist_matrix[tour[i]][tour[i+1]]
+
+    return total
+
 class TSPIndividual:
     def __init__(self, genome):
         self.genome = genome  
         self.fitness = None
         self.rank = None
 
-    def calculate_fitness(self, dist_matrix):
+    def calculate_fitness(self, dist_matrix, optimal_distance=None):
         total = 0
         for i in range(len(self.genome)):
             curr_city = self.genome[i]
             next_city = self.genome[(i + 1) % len(self.genome)]
             total += dist_matrix[curr_city][next_city]
-        self.fitness = total
+        self.fitness = total if optimal_distance is None else total - optimal_distance
 
     def mutate(self):
         if MUTATION_TYPE == "displacement":
@@ -108,10 +139,11 @@ class TSPIndividual:
         self.genome = self.genome[:i] + segment + self.genome[j + 1:]
 
 class TSPPopulation:
-    def __init__(self, coords, size):
+    def __init__(self, coords, size, optimal_distance = None):
         self.dist_matrix = compute_distance_matrix(coords)
         self.size = size
         self.individuals = self.init_population(coords)
+        self.optimal = optimal_distance
 
     def init_population(self, coords):
         base = list(range(len(coords))) 
@@ -119,7 +151,7 @@ class TSPPopulation:
 
     def evaluate_fitness(self):
         for ind in self.individuals:
-            ind.calculate_fitness(self.dist_matrix)
+            ind.calculate_fitness(self.dist_matrix, self.optimal)
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -283,7 +315,7 @@ class TSPPopulation:
             child = self.crossover(p1, p2)
             if random.random() < GA_MUTATIONRATE:
                 child.mutate()
-            child.calculate_fitness(self.dist_matrix)
+            child.calculate_fitness(self.dist_matrix, self.optimal)
             new_pop.append(child)
 
         self.individuals = new_pop
@@ -315,12 +347,31 @@ def linear_scaling(individuals, a,b):
 # -------- Main Runner --------
 
 def main(filepath, pop_size=100, generations=300):
+    #Extracting the coordinates from the file
     coords = read_tsp_file(filepath)
-    population = TSPPopulation(coords, pop_size)
+    optimal_distance = read_opt_tour(filepath, coords)
+
+    #Initializing the population
+    population = TSPPopulation(coords, pop_size, optimal_distance)
+
+    #Initiallizing variables to detect local convergence
+    best_fit_so_far = float('inf')
+    no_improvement_count = 0
 
     for gen in range(generations):
         population.mate()
         best = population.best_individual()
+        
+        #Check for convergence
+        if best.fitness < best_fit_so_far:
+            best_fit_so_far = best.fitness
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+        if no_improvement_count > NO_IMPROVEMENT_LIMIT:
+            print("No improvement => Local optimum convergence.")
+            break
+
         print(f"Gen {gen:3}. Best = {best.genome} ({best.fitness:.2f})")
 
     best = population.best_individual()
@@ -330,4 +381,4 @@ def main(filepath, pop_size=100, generations=300):
 
 
 if __name__ == "__main__":
-    main("salesman_inputs/ulysses16.tsp")
+    main("salesman_inputs/eil51.tsp")
