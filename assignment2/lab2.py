@@ -3,13 +3,14 @@ import math
 import os 
 
 #GA Parameters
+GA_POPSIZE = 2048 #Population size
 GA_MAXITER = 3000
 GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
-#Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH, SHUFFLE)
-PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
+#Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
+PARENT_SELECTION_METHOD = "TOURNAMENT_STOCH"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
@@ -356,13 +357,13 @@ def linear_scaling(individuals, a,b):
     return scaled_fitness
 # -------- Main Runner --------
 
-def main(filepath, pop_size=100):
+def main(filepath):
     #Extracting the coordinates from the file
     coords = read_tsp_file(filepath)
     optimal_distance = read_opt_tour(filepath, coords)
 
     #Initializing the population
-    population = TSPPopulation(coords, pop_size, optimal_distance)
+    population = TSPPopulation(coords, GA_POPSIZE, optimal_distance)
 
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
