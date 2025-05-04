@@ -1,16 +1,18 @@
 import random
 import math
 import os 
+import time
 
 #GA Parameters
 GA_POPSIZE = 2048 #Population size
 GA_MAXITER = 3000
+GA_TIMELIMIT = None
 GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOURNAMENT_STOCH"
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
@@ -358,6 +360,9 @@ def linear_scaling(individuals, a,b):
 # -------- Main Runner --------
 
 def main(filepath):
+    #Initializing the time
+    start_time = time.time()
+
     #Extracting the coordinates from the file
     coords = read_tsp_file(filepath)
     optimal_distance = read_opt_tour(filepath, coords)
@@ -374,6 +379,11 @@ def main(filepath):
         best = population.best_individual()
         
         #Check for convergence
+        #global optimum check
+        if best[1] == 0:
+            print("Global optimum convergence.")
+            break
+        #local optimum check
         if best[1] < best_fit_so_far:
             best_fit_so_far = best[1]
             no_improvement_count = 0
@@ -382,6 +392,11 @@ def main(filepath):
         if no_improvement_count > NO_IMPROVEMENT_LIMIT:
             print("No improvement => Local optimum convergence.")
             break
+        #time exceeded check
+        if time.time() - start_time > GA_TIMELIMIT:
+            print("Time limit exceeded.")
+            break
+
 
         print(f"Gen {gen:3}. Best = {best[0]} ({best[1]:.2f})")
 
@@ -392,4 +407,25 @@ def main(filepath):
     print(f"Best Distance Achieved: {best[1] + optimal_distance:.2f}")
 
 if __name__ == "__main__":
-    main("salesman_inputs/eil51.tsp")
+
+    #Check validity of the number of arguments
+    if len(os.sys.argv) != 3:
+        print("Usage: python lab2.py <time_limit> <tsp_file>")
+        exit(1)
+
+    #Check validity of the time limit (it should be a positive integer)
+    try:
+        GA_TIMELIMIT = int(os.sys.argv[1])
+        if GA_TIMELIMIT <= 0:
+            raise ValueError
+    except ValueError:
+        print("Time limit should be a positive integer.")
+        exit(1)
+
+    #Extracting the tsp file path and checking its validity
+    file_path = os.sys.argv[2]
+    if not os.path.exists(file_path):
+        print(f"File {file_path} does not exist.")
+        exit(1)
+
+    main(file_path)
