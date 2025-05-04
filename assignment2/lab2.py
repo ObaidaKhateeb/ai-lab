@@ -72,12 +72,10 @@ class TSPIndividual:
         self.rank = None
 
     def calculate_fitness(self, dist_matrix, optimal_distance=None):
-        total = 0
-        for i in range(len(self.genome)):
-            curr_city = self.genome[i]
-            next_city = self.genome[(i + 1) % len(self.genome)]
-            total += dist_matrix[curr_city][next_city]
-        self.fitness = total if optimal_distance is None else total - optimal_distance
+        path = self.genome
+        self.fitness = sum(dist_matrix[path[i]][path[(i+1) % len(path)]]
+                       for i in range(len(path))) - optimal_distance
+        
 
     def mutate(self):
         if MUTATION_TYPE == "displacement":
@@ -322,7 +320,18 @@ class TSPPopulation:
         self.individuals = new_pop
 
     def best_individual(self):
-        return min(self.individuals, key=lambda x: x.fitness)
+        routes = [(ind.genome, ind.fitness) for ind in self.individuals]
+        routes.sort(key=lambda x: x[1])
+        #intialize it as a list of one element which is the set of the first element routes (paths between each two cities)
+        edges_to_check_wtih = [set((routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]) for i in range(len(routes[0][0])))]
+
+        #to find the first individual that not disjoint with the rest of the individuals
+        for i in range(1, len(routes)):
+            route_edges = set((routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]) for j in range(len(routes[i][0])))
+            if all(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
+                edges_to_check_wtih.append(route_edges)
+            else:
+                return routes[i][0], routes[i][1]
 
 
 def euclidean_distance(a, b):
@@ -364,8 +373,8 @@ def main(filepath, pop_size=100):
         best = population.best_individual()
         
         #Check for convergence
-        if best.fitness < best_fit_so_far:
-            best_fit_so_far = best.fitness
+        if best[1] < best_fit_so_far:
+            best_fit_so_far = best[1]
             no_improvement_count = 0
         else:
             no_improvement_count += 1
@@ -373,14 +382,13 @@ def main(filepath, pop_size=100):
             print("No improvement => Local optimum convergence.")
             break
 
-        print(f"Gen {gen:3}. Best = {best.genome} ({best.fitness:.2f})")
+        print(f"Gen {gen:3}. Best = {best[0]} ({best[1]:.2f})")
 
     best = population.best_individual()
     print("\nBest tour:")
-    print(best.genome)
-    print(f"Best Fitness Achieved: {best.fitness:.2f}")
-    print(f"Best Distance Achieved: {best.fitness + optimal_distance:.2f}")
-
+    print(best[0])
+    print(f"Best Fitness Achieved: {best[1]:.2f}")
+    print(f"Best Distance Achieved: {best[1] + optimal_distance:.2f}")
 
 if __name__ == "__main__":
     main("salesman_inputs/eil51.tsp")
