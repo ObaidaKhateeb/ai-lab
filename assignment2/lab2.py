@@ -1,6 +1,10 @@
 import random
 import math
 
+#GA Parameters
+GA_ELITRATE = 0.05 #Elitism rate
+GA_MUTATIONRATE = 0.25 #Mutation rate
+
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH, SHUFFLE)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
@@ -138,7 +142,7 @@ class TSPPopulation:
         rand = random.randint(0, len(self.individuals) // 2 - 1)
         return rand, self.individuals[rand].genome
 
-    #A function that selects a parent using RWS (section 10)
+    #A function that selects a parent using RWS 
     def rws_selection(self):
         
         #Scaling the fitness values using linear scaling    
@@ -167,7 +171,7 @@ class TSPPopulation:
                 return i, self.individuals[i].genome
         return len(self.individuals) - 1, self.individuals[-1].genome 
 
-    #A function that selects a list of parents using SUS (Section 10)
+    #A function that selects a list of parents using SUS 
     def sus_selection(self, num_parents):
         
         #Scaling the fitness values using linear scaling
@@ -198,13 +202,13 @@ class TSPPopulation:
                     break
         return parents
 
-    #A function that selects a parent using Deterministic Tournament Selection (Section 10)
+    #A function that selects a parent using Deterministic Tournament Selection 
     def tournament_selection_deter(self):
         tournament = random.sample(range(len(self.individuals)), TOURNAMENT_K) #choosing K random indices 
         tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
         return tournament[0], self.individuals[tournament[0]].genome
 
-    #A function that selects a parent using Stochastic Tournament Selection (Section 10)
+    #A function that selects a parent using Stochastic Tournament Selection 
     def tournament_selection_stoch(self):
         tournament = random.sample(range(len(self.individuals)), TOURNAMENT_K) #choosing K random indices
         tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
@@ -219,30 +223,65 @@ class TSPPopulation:
             ind.rank = rank + 1
 
     def crossover(self, p1, p2):
-        self.order_crossover(p1.genome, p2.genome)
+        return self.cx_crossover(p1, p2)
 
     def order_crossover(self, p1, p2):
         size = len(p1)
-        start, end = sorted(random.sample(range(size), 2))
-        child = [None] * size
-        child[start:end] = p1[start:end]
-        pos = end
-        for gene in p2:
-            if gene not in child:
-                while child[pos % size] is not None:
+        indices_to_copy = random.sample(range(size), size // 2)
+        child = [p1[i] if i in indices_to_copy else None for i in range(size)]
+        pos = 0
+        for i in range(size):
+            if child[i] is None:
+                while p2[pos] in child:
                     pos += 1
-                child[pos % size] = gene
+                child[i] = p2[pos]
+        return TSPIndividual(child)
+    
+    def pmx_crossover(self, p1, p2):
+        size = len(p1)
+        indices_to_copy = random.sample(range(size), size // 2)
+        child = [p1[i] if i in indices_to_copy else None for i in range(size)]
+        for i in range(size):
+            if child[i] is None:
+                gene = p2[i]
+                while gene in child:
+                    index = p1.index(gene)
+                    gene = p2[index]
+                child[i] = gene
         return TSPIndividual(child)
 
-    def evolve(self, elitism=0.1, mutation_rate=0.2):
+    def cx_crossover(self, p1, p2):
+        size = len(p1)
+        child = [None] * size
+        indices = list(range(size))
+        cycle = 0
+
+        while None in child:
+            start = indices[0]
+            idx = start
+            while True:
+                if cycle % 2 == 0:
+                    child[idx] = p1[idx]
+                else:
+                    child[idx] = p2[idx]
+                indices.remove(idx)
+                idx = p1.index(p2[idx])
+                if idx == start:
+                    break
+            cycle += 1
+
+        return TSPIndividual(child)
+
+
+    def mate(self):
         self.evaluate_fitness()
-        new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(elitism * self.size)]
+        new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
 
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
             _, p2 = self.select_parents()
-            child = self.order_crossover(p1, p2)
-            if random.random() < mutation_rate:
+            child = self.crossover(p1, p2)
+            if random.random() < GA_MUTATIONRATE:
                 child.mutate()
             child.calculate_fitness(self.dist_matrix)
             new_pop.append(child)
@@ -269,7 +308,7 @@ def compute_distance_matrix(coords):
 
 
 
-#A function that linearly scales the fitness values (Section 10)
+#A function that linearly scales the fitness values 
 def linear_scaling(individuals, a,b):
     scaled_fitness = [a * ind.fitness + b for ind in individuals]
     return scaled_fitness
@@ -280,7 +319,7 @@ def main(filepath, pop_size=100, generations=300):
     population = TSPPopulation(coords, pop_size)
 
     for gen in range(generations):
-        population.evolve()
+        population.mate()
         best = population.best_individual()
         print(f"Gen {gen:3}. Best = {best.genome} ({best.fitness:.2f})")
 
