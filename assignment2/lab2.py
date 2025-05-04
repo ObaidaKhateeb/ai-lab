@@ -11,6 +11,9 @@ GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
+#Crossover mode (options: PMX, OX, CX)
+CROSSOVER_TYPE = "CX"
+
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
@@ -257,7 +260,14 @@ class TSPPopulation:
             ind.rank = rank + 1
 
     def crossover(self, p1, p2):
-        return self.cx_crossover(p1, p2)
+        if CROSSOVER_TYPE == "PMX":
+            return self.pmx_crossover(p1, p2)
+        elif CROSSOVER_TYPE == "OX":
+            return self.order_crossover(p1, p2)
+        elif CROSSOVER_TYPE == "CX":
+            return self.cx_crossover(p1, p2)
+        else:
+            raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
 
     def order_crossover(self, p1, p2):
         size = len(p1)
