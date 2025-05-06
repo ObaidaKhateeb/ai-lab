@@ -11,6 +11,9 @@ GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
+#Problem (TSP, BIN_PACK)
+PROBLEM = "TSP"
+
 #Crossover mode (options: PMX, OX, CX)
 CROSSOVER_TYPE = "CX"
 
@@ -45,31 +48,19 @@ def read_tsp_file(filepath):
 def read_opt_tour(filepath, coords):
     opt_path = filepath.replace(".tsp", ".opt.tour")
 
-    if not os.path.exists(opt_path): #check if the optimal tour file exists
-        return None 
+    if not os.path.exists(opt_path):
+        return None
 
-    tour = []
     with open(opt_path, 'r') as file:
-        relevant_line = False
         for line in file:
-            if "TOUR_SECTION" in line:
-                relevant_line = True
-                continue
-            if "-1" in line or "EOF" in line:
-                break
-            if relevant_line:
-                city_index = int(line.strip()) - 1  #convert to 0-based index
-                tour.append(city_index)
-
-    tour.append(tour[0]) #add the first city to the end of the tour (the return to the starting point)
-
-    #Calculating the total distance of the tour
-    dist_matrix = compute_distance_matrix(coords)
-    total = 0
-    for i in range(len(tour) - 1):
-        total += dist_matrix[tour[i]][tour[i+1]]
-
-    return total
+            if line.startswith("COMMENT"):
+                start = line.find('(')
+                end = line.find(')', start)
+                if start != -1 and end != -1:
+                    num_str = line[start+1:end]
+                    if num_str.isdigit():
+                        return int(num_str)
+    return None
 
 class TSPIndividual:
     def __init__(self, genome):
