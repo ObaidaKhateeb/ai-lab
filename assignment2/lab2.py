@@ -4,7 +4,7 @@ import os
 import time
 
 #GA Parameters
-GA_POPSIZE = 2048 #Population size
+GA_POPSIZE = 512 #Population size
 GA_MAXITER = 3000
 GA_TIMELIMIT = None
 GA_ELITRATE = 0.05 #Elitism rate
@@ -14,11 +14,11 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 #Problem (TSP, BIN_PACK)
 PROBLEM = "TSP"
 
-#Crossover mode (options: PMX, OX, CX)
-CROSSOVER_TYPE = "CX"
+#Crossover mode (options: PMX, OX, CX, ER)
+CROSSOVER_TYPE = "ER"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
+PARENT_SELECTION_METHOD = "RWS"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
@@ -45,6 +45,24 @@ def read_tsp_file(filepath):
                     coords.append((float(x), float(y)))
     return coords
 
+def read_binpack_file(filepath):
+    weights = []
+    with open(filepath, 'r') as file:
+        lines = file.readlines()
+    try: 
+        bin_max = int(lines[2].strip().split()[0])
+    except ValueError:
+        print("Error: Invalid Format")
+        return None
+    for line in lines[3:]:
+        line = line.strip()
+        if line.startswith('u'):
+            break  
+        if line: 
+            weights.append(int(line))
+
+    return bin_max, weights
+
 def read_opt_tour(filepath, coords):
     opt_path = filepath.replace(".tsp", ".opt.tour")
 
@@ -62,16 +80,42 @@ def read_opt_tour(filepath, coords):
                         return int(num_str)
     return None
 
+def read_opt_binpack(filepath):
+    with open(filepath, 'r') as file:
+        lines = file.readlines()
+
+    if len(lines) < 3:
+        return None
+
+    third_line = lines[2].strip()
+    parts = third_line.split()
+
+    if len(parts) >= 3 and parts[2].isdigit():
+        return int(parts[2])
+
+    return None 
+
+
 class TSPIndividual:
     def __init__(self, genome):
         self.genome = genome  
         self.fitness = None
         self.rank = None
 
-    def calculate_fitness(self, dist_matrix, optimal_distance=None):
+    def calculate_fitness(self, dist_matrix, optimal=None, bin_size = None):
         path = self.genome
-        self.fitness = sum(dist_matrix[path[i]][path[(i+1) % len(path)]]
-                       for i in range(len(path))) - optimal_distance
+        if PROBLEM == "TSP":
+            self.fitness = sum(dist_matrix[path[i]][path[(i+1) % len(path)]]
+                        for i in range(len(path))) - optimal
+        elif PROBLEM == "BIN_PACK":
+            total_bins = 0
+            bin_sum = 0
+            for weight in self.genome:
+                bin_sum += weight
+                if bin_sum > bin_size:
+                    total_bins += 1
+                    bin_sum = weight
+            self.fitness = total_bins - optimal               
         
 
     def mutate(self):
@@ -135,19 +179,20 @@ class TSPIndividual:
         self.genome = self.genome[:i] + segment + self.genome[j + 1:]
 
 class TSPPopulation:
-    def __init__(self, coords, size, optimal_distance = None):
-        self.dist_matrix = compute_distance_matrix(coords)
+    def __init__(self, coords, size, optimal_distance = None, bin_size = None):
+        self.dist_matrix = compute_distance_matrix(coords) if PROBLEM == "TSP" else None
         self.size = size
         self.individuals = self.init_population(coords)
         self.optimal = optimal_distance
+        self.bin_size = bin_size
 
-    def init_population(self, coords):
-        base = list(range(len(coords))) 
-        return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)] #randomly shuffle the coordinates of the cities
+    def init_population(self, items):
+        base = list(range(len(items))) if PROBLEM == "TSP" else list(items)
+        return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)] #randomly shuffle the items
 
     def evaluate_fitness(self):
         for ind in self.individuals:
-            ind.calculate_fitness(self.dist_matrix, self.optimal)
+            ind.calculate_fitness(self.dist_matrix, self.optimal, self.bin_size)
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -257,6 +302,8 @@ class TSPPopulation:
             return self.order_crossover(p1, p2)
         elif CROSSOVER_TYPE == "CX":
             return self.cx_crossover(p1, p2)
+        elif CROSSOVER_TYPE == "ER":
+            return self.er_crossover(p1, p2)
         else:
             raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
 
@@ -264,12 +311,15 @@ class TSPPopulation:
         size = len(p1)
         indices_to_copy = random.sample(range(size), size // 2)
         child = [p1[i] if i in indices_to_copy else None for i in range(size)]
+        remaining_items = [p1[i] for i in range(size) if i not in indices_to_copy]
         pos = 0
         for i in range(size):
             if child[i] is None:
-                while p2[pos] in child:
+                while p2[pos] not in remaining_items:
                     pos += 1
                 child[i] = p2[pos]
+                remaining_items.remove(p2[pos])
+                pos += 1
         return TSPIndividual(child)
     
     def pmx_crossover(self, p1, p2):
@@ -306,7 +356,51 @@ class TSPPopulation:
             cycle += 1
 
         return TSPIndividual(child)
+    
+    def er_crossover(self, p1, p2):
+        size = len(p1)
+        child = []
+        used = set()
 
+        # Build a neighbor dictionary from both parents
+        def get_neighbors(p):
+            neighbors = {i: set() for i in p}
+            for i in range(len(p)):
+                a, b = p[i], p[(i+1) % size]
+                neighbors[a].add(b)
+                neighbors[b].add(a)
+            return neighbors
+
+        n1 = get_neighbors(p1)
+        n2 = get_neighbors(p2)
+
+        # Union both neighbor maps
+        neighbors = {k: n1[k].union(n2[k]) for k in n1}
+
+        # Start from a random city
+        current = random.choice(p1)
+        child.append(current)
+        used.add(current)
+
+        while len(child) < size:
+            common = n1[current].intersection(n2[current]) - used
+            if common:
+                next_city = min(common)
+            else:
+                # All neighbors from both parents excluding used ones
+                candidates = neighbors[current] - used
+                if candidates:
+                    next_city = min(candidates)
+                else:
+                    # Fallback: choose smallest unused city
+                    remaining = [c for c in p1 if c not in used]
+                    next_city = min(remaining)
+
+            child.append(next_city)
+            used.add(next_city)
+            current = next_city
+
+        return TSPIndividual(child)
 
     def mate(self):
         self.evaluate_fitness()
@@ -318,7 +412,7 @@ class TSPPopulation:
             child = self.crossover(p1, p2)
             if random.random() < GA_MUTATIONRATE:
                 child.mutate()
-            child.calculate_fitness(self.dist_matrix, self.optimal)
+            child.calculate_fitness(self.dist_matrix, self.optimal, self.bin_size)
             new_pop.append(child)
 
         self.individuals = new_pop
@@ -365,11 +459,15 @@ def main(filepath):
     start_time = time.time()
 
     #Extracting the coordinates from the file
-    coords = read_tsp_file(filepath)
-    optimal_distance = read_opt_tour(filepath, coords)
+    if PROBLEM == "TSP":
+        items = read_tsp_file(filepath)
+    elif PROBLEM == "BIN_PACK":
+        bin_max, items = read_binpack_file(filepath)
+
+    optimal_distance = read_opt_tour(filepath, items) if PROBLEM == "TSP" else read_opt_binpack(filepath)
 
     #Initializing the population
-    population = TSPPopulation(coords, GA_POPSIZE, optimal_distance)
+    population = TSPPopulation(items, GA_POPSIZE, optimal_distance, bin_max if PROBLEM == "BIN_PACK" else None)
 
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
