@@ -18,7 +18,7 @@ PROBLEM = "TSP"
 CROSSOVER_TYPE = "ER"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "SUS"
+PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
@@ -246,7 +246,7 @@ class TSPPopulation:
         return len(self.individuals) - 1, self.individuals[-1].genome 
 
     #A function that selects a list of parents using SUS 
-    def sus_selection(self, num_parents = 2):
+    def sus_selection(self):
         if not self.parents:
             #Scaling the fitness values using linear scaling
             max_fitness = max(ind.fitness for ind in self.individuals)
