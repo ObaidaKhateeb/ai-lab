@@ -18,14 +18,14 @@ PROBLEM = "TSP"
 CROSSOVER_TYPE = "CX"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
-PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
 
 #Tournament Parameters
 TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "scramble" 
+MUTATION_TYPE = "simple_inversion" 
 
 #Mutation Control Parameters 
 MUTATION_CONTROL_METHOD = "NON-LINEAR" # (NON-LINEAR, TRIG-HYPER)
@@ -491,25 +491,13 @@ class TSPPopulation(BasePopulation):
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
-        edges_to_check_wtih = [set((min(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]), max(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])])) for i in range(len(routes[0][0])))]
+        edges_to_check_with = [set(edge for i in range(len(routes[0][0])) for edge in [(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]),(routes[0][0][(i + 1) % len(routes[0][0])], routes[0][0][i])])]
         for i in range(1, len(routes)):
-            route_edges = set((min(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]), max(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])])) for j in range(len(routes[i][0])))
-            #iterate over all the sets in edges_to_check_with and print the first one that route_edge is disjoint with
-            for j,edge_set in enumerate(edges_to_check_wtih):
-                if route_edges.isdisjoint(edge_set):
-                    return routes[i][0], routes[i][1]
-            edges_to_check_wtih.append(route_edges)
-        print("There's no valid answer")
-
-
-            # if all(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
-            #     edges_to_check_wtih.append(route_edges)
-            # else:
-            #     #print the one that routes[i][0] is disjoint with
-                
-            #     print(f"Best of bests is {routes[0][0]} with fitness {routes[0][1]}") 
-
-            #     return routes[i][0], routes[i][1]
+            route_edges = set(edge for j in range(len(routes[i][0])) for edge in [(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]), (routes[i][0][(j + 1) % len(routes[i][0])], routes[i][0][j])])
+            if any(route_edges.isdisjoint(edges) for edges in edges_to_check_with):
+                edges_to_check_with.append(route_edges)
+            else:
+                return routes[i][0], routes[i][1]
 
 
 class BinPackPopulation(BasePopulation):
@@ -605,16 +593,26 @@ def main(filepath):
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
     no_improvement_count = 0
-
+    no_valid_count = 0
+    best_found = None
     for gen in range(GA_MAXITER):
         population.mate()
         best = population.best_individual()
+        if best == None: 
+            no_valid_count += 1
+            print(f"Gen {gen:3}. Best = None")
+            if no_valid_count >= 50:
+                break
+            else:
+                continue
         
+        best_found = best
         #Check for convergence
         #global optimum check
         if best[1] == 0:
             print("Global optimum convergence.")
             break
+
         #local optimum check
         if best[1] < best_fit_so_far:
             best_fit_so_far = best[1]
@@ -632,11 +630,10 @@ def main(filepath):
 
         print(f"Gen {gen:3}. Best = {best[0]} ({best[1]:.2f})")
 
-    best = population.best_individual()
     print("\nBest tour:")
-    print(best[0])
-    print(f"Best Fitness Achieved: {best[1]:.2f}")
-    print(f"Best Distance Achieved: {best[1] + optimal:.2f}")
+    print(best_found[0])
+    print(f"Best Fitness Achieved: {best_found[1]:.2f}")
+    print(f"Best Distance Achieved: {best_found[1] + optimal:.2f}")
 
 def run_ga_from_data_binpack(weights, bin_max, optimal, time_limit):
     global GA_TIMELIMIT
