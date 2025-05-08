@@ -102,20 +102,10 @@ class TSPIndividual:
         self.fitness = None
         self.rank = None
 
-    def calculate_fitness(self, dist_matrix, optimal=None, bin_size = None):
+    def calculate_fitness(self, dist_matrix, optimal=None):
         path = self.genome
-        if PROBLEM == "TSP":
-            self.fitness = sum(dist_matrix[path[i]][path[(i+1) % len(path)]]
-                        for i in range(len(path))) - optimal
-        elif PROBLEM == "BIN_PACK":
-            total_bins = 0
-            bin_sum = 0
-            for weight in self.genome:
-                bin_sum += weight
-                if bin_sum > bin_size:
-                    total_bins += 1
-                    bin_sum = weight
-            self.fitness = total_bins - optimal               
+        self.fitness = sum(dist_matrix[path[i]][path[(i+1) % len(path)]]
+                    for i in range(len(path))) - optimal         
         
 
     def mutate(self):
@@ -179,21 +169,20 @@ class TSPIndividual:
         self.genome = self.genome[:i] + segment + self.genome[j + 1:]
 
 class TSPPopulation:
-    def __init__(self, coords, size, optimal_distance = None, bin_size = None):
-        self.dist_matrix = compute_distance_matrix(coords) if PROBLEM == "TSP" else None
+    def __init__(self, coords, size, optimal_distance = None):
+        self.dist_matrix = compute_distance_matrix(coords)
         self.size = size
         self.individuals = self.init_population(coords)
         self.optimal = optimal_distance
-        self.bin_size = bin_size
         self.parents = None #to store the parents selected by the SUS method
 
     def init_population(self, items):
-        base = list(range(len(items))) if PROBLEM == "TSP" else list(items)
+        base = list(range(len(items)))
         return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)] #randomly shuffle the items
 
     def evaluate_fitness(self):
         for ind in self.individuals:
-            ind.calculate_fitness(self.dist_matrix, self.optimal, self.bin_size)
+            ind.calculate_fitness(self.dist_matrix, self.optimal)
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -417,7 +406,7 @@ class TSPPopulation:
             child = self.crossover(p1, p2)
             if random.random() < GA_MUTATIONRATE:
                 child.mutate()
-            child.calculate_fitness(self.dist_matrix, self.optimal, self.bin_size)
+            child.calculate_fitness(self.dist_matrix, self.optimal)
             new_pop.append(child)
         self.individuals = new_pop
 
@@ -434,7 +423,6 @@ class TSPPopulation:
                 edges_to_check_wtih.append(route_edges)
             else:
                 return routes[i][0], routes[i][1]
-
 
 def euclidean_distance(a, b):
     return round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
@@ -471,7 +459,7 @@ def main(filepath):
     optimal_distance = read_opt_tour(filepath, items) if PROBLEM == "TSP" else read_opt_binpack(filepath)
 
     #Initializing the population
-    population = TSPPopulation(items, GA_POPSIZE, optimal_distance, bin_max if PROBLEM == "BIN_PACK" else None)
+    population = TSPPopulation(items, GA_POPSIZE, optimal_distance)
 
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
