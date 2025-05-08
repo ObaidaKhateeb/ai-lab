@@ -15,7 +15,7 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 PROBLEM = "TSP"
 
 #Crossover mode (options: PMX, OX, CX, ER)
-CROSSOVER_TYPE = "ER"
+CROSSOVER_TYPE = "CX"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
@@ -25,7 +25,11 @@ TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "simple_inversion" 
+MUTATION_TYPE = "scramble" 
+
+#Mutation Control Parameters 
+MUTATION_CONTROL_METHOD = "NON-LINEAR" # (NON-LINEAR, TRIG-HYPER)
+TRIG_HYPER_TRIGGER = "AVG_FIT" # (AVG_FIT, BEST_FIT, STD_FIT, IMP_FIT)
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -185,6 +189,9 @@ class BasePopulation:
         self.size = size
         self.individuals = []
         self.parents = None  # to store the parents selected by the SUS method
+        self.average_fitness = []
+        self.best_fitness = []
+        self.std_devs = []
 
     def evaluate_fitness(self):
         raise NotImplementedError
@@ -383,6 +390,71 @@ class BasePopulation:
             current = next_city
         return TSPIndividual(child)
 
+    def generation_stats(self):
+        fitnesses = [ind.fitness for ind in self.individuals]
+        self.average_fitness.append(sum(fitnesses) / len(fitnesses))
+        self.best_fitness.append(min(fitnesses))
+        variance = sum((f - self.average_fitness[-1]) ** 2 for f in fitnesses) / len(fitnesses)
+        std_dev = math.sqrt(variance) 
+        self.std_devs.append(std_dev)
+    
+    def mutaiton_control(self):
+        return
+        self.non_linear_mutation_policy()
+
+    def non_linear_mutation_policy(self):
+        global GA_MUTATIONRATE
+
+        #Defining the parameters
+        min_mutation_rate=0.05
+        p_max=0.5
+        r=0.01
+        generation = len(self.average_fitness)
+
+        #Computing the mutation rate
+        exp_term = math.exp(-r * generation)
+        numerator = 2 * (p_max * exp_term)
+        denominator = 1 + exp_term
+        f_t = numerator / denominator
+
+        #Adjusting mutate rate 
+        GA_MUTATIONRATE = max(f_t , min_mutation_rate)
+        print(f"Mutation rate: {GA_MUTATIONRATE:.2f}")
+    
+    def trigger_hyper_mutation_policy(self):
+        global GA_MUTATIONRATE, TRIG_HYPER_TRIGGER
+        high_mutation = 0.5 
+        low_mutation = 0.25
+        if TRIG_HYPER_TRIGGER == "BEST_FIT":
+            k = 10 
+            if len(self.best_fitness) > k and self.best_fitness[-1] == self.best_fitness[-k:]:
+                GA_MUTATIONRATE = high_mutation
+            else:
+                GA_MUTATIONRATE = low_mutation
+        elif TRIG_HYPER_TRIGGER == "AVG_FIT":
+            k = 10 
+            epsilon = self.average_fitness[-1] * 0.01
+            if len(self.average_fitness) > k and self.average_fitness[-1] - self.average_fitness[-k:] < epsilon:
+                GA_MUTATIONRATE = high_mutation
+            else:
+                GA_MUTATIONRATE = low_mutation
+        elif TRIG_HYPER_TRIGGER == "STD_FIT":
+            k = 10 
+            epsilon = self.std_devs[-1] * 0.01
+            if len(self.std_devs) > k and self.std_devs[-1] - self.std_devs[-k:] < epsilon:
+                GA_MUTATIONRATE = high_mutation
+            else:
+                GA_MUTATIONRATE = low_mutation
+        
+            
+            
+            
+
+
+    
+
+
+
 class TSPPopulation(BasePopulation):
     def __init__(self, coords, size, optimal_distance=None):
         super().__init__(size)
@@ -400,6 +472,11 @@ class TSPPopulation(BasePopulation):
 
     def mate(self):
         self.evaluate_fitness()
+
+        #Evaluating the population stats and adjusting the mutation rate
+        self.generation_stats()
+        self.mutaiton_control()
+
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
@@ -414,13 +491,26 @@ class TSPPopulation(BasePopulation):
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
-        edges_to_check_wtih = [set((routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]) for i in range(len(routes[0][0])))]
+        edges_to_check_wtih = [set((min(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]), max(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])])) for i in range(len(routes[0][0])))]
         for i in range(1, len(routes)):
-            route_edges = set((routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]) for j in range(len(routes[i][0])))
-            if all(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
-                edges_to_check_wtih.append(route_edges)
-            else:
-                return routes[i][0], routes[i][1]
+            route_edges = set((min(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]), max(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])])) for j in range(len(routes[i][0])))
+            #iterate over all the sets in edges_to_check_with and print the first one that route_edge is disjoint with
+            for j,edge_set in enumerate(edges_to_check_wtih):
+                if route_edges.isdisjoint(edge_set):
+                    return routes[i][0], routes[i][1]
+            edges_to_check_wtih.append(route_edges)
+        print("There's no valid answer")
+
+
+            # if all(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
+            #     edges_to_check_wtih.append(route_edges)
+            # else:
+            #     #print the one that routes[i][0] is disjoint with
+                
+            #     print(f"Best of bests is {routes[0][0]} with fitness {routes[0][1]}") 
+
+            #     return routes[i][0], routes[i][1]
+
 
 class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
@@ -439,6 +529,11 @@ class BinPackPopulation(BasePopulation):
 
     def mate(self):
         self.evaluate_fitness()
+
+        #Evaluating the population stats and adjusting the mutation rate
+        self.generation_stats()
+        self.mutaiton_control()
+
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
@@ -542,6 +637,37 @@ def main(filepath):
     print(best[0])
     print(f"Best Fitness Achieved: {best[1]:.2f}")
     print(f"Best Distance Achieved: {best[1] + optimal:.2f}")
+
+def run_ga_from_data_binpack(weights, bin_max, optimal, time_limit):
+    global GA_TIMELIMIT
+    GA_TIMELIMIT = time_limit
+    population = BinPackPopulation(weights, GA_POPSIZE, optimal, bin_max)
+
+    best_fit_so_far = float('inf')
+    no_improvement_count = 0
+    start_time = time.time()
+
+    for gen in range(GA_MAXITER):
+        population.mate()
+        best = population.best_individual()
+        if isinstance(best, tuple):
+            fitness = best[1]
+        else:
+            fitness = best[1]
+
+        if fitness == 0:
+            break
+        if fitness < best_fit_so_far:
+            best_fit_so_far = fitness
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+        if no_improvement_count > NO_IMPROVEMENT_LIMIT:
+            break
+        if time.time() - start_time > GA_TIMELIMIT:
+            break
+
+    return fitness
 
 if __name__ == "__main__":
 
