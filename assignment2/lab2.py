@@ -12,10 +12,10 @@ GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Problem (TSP, BIN_PACK)
-PROBLEM = "BIN_PACK"
+PROBLEM = "TSP"
 
 #Crossover mode (options: PMX, OX, CX, ER)
-CROSSOVER_TYPE = "PMX"
+CROSSOVER_TYPE = "ER"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
@@ -179,21 +179,15 @@ class TSPIndividual:
         random.shuffle(segment)
         self.genome = self.genome[:i] + segment + self.genome[j + 1:]
 
-class TSPPopulation:
-    def __init__(self, coords, size, optimal_distance = None):
-        self.dist_matrix = compute_distance_matrix(coords)
-        self.size = size
-        self.individuals = self.init_population(coords)
-        self.optimal = optimal_distance
-        self.parents = None #to store the parents selected by the SUS method
 
-    def init_population(self, items):
-        base = list(range(len(items)))
-        return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)] #randomly shuffle the items
+class BasePopulation:
+    def __init__(self, size):
+        self.size = size
+        self.individuals = []
+        self.parents = None  # to store the parents selected by the SUS method
 
     def evaluate_fitness(self):
-        for ind in self.individuals:
-            ind.calculate_fitness(self.dist_matrix, self.optimal)
+        raise NotImplementedError
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -211,22 +205,21 @@ class TSPPopulation:
         else:
             raise ValueError(f"Wrong parent selection method: {PARENT_SELECTION_METHOD}")
 
-    #A function that selects a parent using Top Half Uniform  
+    #A function that selects a parent using Top Half Uniform
     def top_half_uniform_selection(self):
         rand = random.randint(0, len(self.individuals) // 2 - 1)
         return rand, self.individuals[rand].genome
 
-    #A function that selects a parent using RWS 
+    #A function that selects a parent using RWS
     def rws_selection(self):
-        
-        #Scaling the fitness values using linear scaling    
+
+        #Scaling the fitness values using linear scaling 
         max_fitness = max(ind.fitness for ind in self.individuals)
         scaled_fitnesses = linear_scaling(self.individuals, -1, max_fitness)
-        
+
         #Converting fitness values to probabilities
         total_scaled = sum(scaled_fitnesses)
         selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
-        
         if total_scaled == 0:
             random_choice = random.randint(0, len(self.individuals) - 1)
             return random_choice, self.individuals[random_choice].genome
@@ -237,13 +230,13 @@ class TSPPopulation:
         for prob in selection_probs:
             cumsum += prob
             cumulative_probs.append(cumsum)
-        
+
         #Selecting a random individual
         pick = random.random()
         for i, prob in enumerate(cumulative_probs):
             if pick < prob:
                 return i, self.individuals[i].genome
-        return len(self.individuals) - 1, self.individuals[-1].genome 
+        return len(self.individuals) - 1, self.individuals[-1].genome
 
     #A function that selects a list of parents using SUS 
     def sus_selection(self):
@@ -257,9 +250,8 @@ class TSPPopulation:
             if total_fitness == 0:
                 random_choice = random.randint(0, len(self.individuals) - 1)
                 return random_choice, self.individuals[random_choice].genome
-            
             selection_probs = [fit / total_fitness for fit in scaled_fitness]
-            
+
             #Building the "roulete"
             cumulative_probs = []
             cumsum = 0
@@ -268,17 +260,15 @@ class TSPPopulation:
                 cumulative_probs.append(cumsum)
 
             #Selecting a random starting point, then parents
-            target = random.random() 
+            target = random.random()
             self.parents = []
             for j, prob in enumerate(cumulative_probs):
                 if target < prob:
                     self.parents.append((j, self.individuals[j].genome))
                     break
-
         i1, p1 = self.parents[0]
-        self.parents = self.parents[1:] #removing the two chosen parents from the list
+        self.parents = self.parents[1:]
         return i1, p1
-
 
     #A function that selects a parent using Deterministic Tournament Selection 
     def tournament_selection_deter(self):
@@ -291,14 +281,14 @@ class TSPPopulation:
         tournament = random.sample(range(len(self.individuals)), TOURNAMENT_K) #choosing K random indices
         tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
         for i in range(TOURNAMENT_K):
-            if random.random() < TOURNAMENT_P: 
+            if random.random() < TOURNAMENT_P:
                 return tournament[i], self.individuals[tournament[i]].genome
         return tournament[-1], self.individuals[tournament[-1]].genome
 
     def fitness_ranking(self):
         sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
         for rank, ind in enumerate(sorted_inds):
-           ind.rank = rank + 1
+            ind.rank = rank + 1
 
     def crossover(self, p1, p2):
         if CROSSOVER_TYPE == "PMX":
@@ -326,7 +316,7 @@ class TSPPopulation:
                 remaining_items.remove(p2[pos])
                 pos += 1
         return TSPIndividual(child)
-    
+
     def pmx_crossover(self, p1, p2):
         size = len(p1)
         indices_to_copy = random.sample(range(size), size // 2)
@@ -345,7 +335,6 @@ class TSPPopulation:
         child = [None] * size
         indices = list(range(size))
         cycle = 0
-
         while None in child:
             start = indices[0]
             idx = start
@@ -359,58 +348,59 @@ class TSPPopulation:
                 if idx == start:
                     break
             cycle += 1
-
         return TSPIndividual(child)
-    
+
     def er_crossover(self, p1, p2):
         size = len(p1)
         child = []
         used = set()
-
-        # Build a neighbor dictionary from both parents
         def get_neighbors(p):
             neighbors = {i: set() for i in p}
             for i in range(len(p)):
-                a, b = p[i], p[(i+1) % size]
+                a, b = p[i], p[(i + 1) % size]
                 neighbors[a].add(b)
                 neighbors[b].add(a)
             return neighbors
-
         n1 = get_neighbors(p1)
         n2 = get_neighbors(p2)
-
-        # Union both neighbor maps
         neighbors = {k: n1[k].union(n2[k]) for k in n1}
-
-        # Start from a random city
         current = random.choice(p1)
         child.append(current)
         used.add(current)
-
         while len(child) < size:
             common = n1[current].intersection(n2[current]) - used
             if common:
                 next_city = min(common)
             else:
-                # All neighbors from both parents excluding used ones
                 candidates = neighbors[current] - used
                 if candidates:
                     next_city = min(candidates)
                 else:
-                    # Fallback: choose smallest unused city
                     remaining = [c for c in p1 if c not in used]
                     next_city = min(remaining)
-
             child.append(next_city)
             used.add(next_city)
             current = next_city
-
         return TSPIndividual(child)
+
+class TSPPopulation(BasePopulation):
+    def __init__(self, coords, size, optimal_distance=None):
+        super().__init__(size)
+        self.dist_matrix = compute_distance_matrix(coords)
+        self.individuals = self.init_population(coords)
+        self.optimal = optimal_distance
+
+    def init_population(self, items):
+        base = list(range(len(items)))
+        return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)]
+
+    def evaluate_fitness(self):
+        for ind in self.individuals:
+            ind.calculate_fitness(self.dist_matrix, self.optimal)
 
     def mate(self):
         self.evaluate_fitness()
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
-
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
             _, p2 = self.select_parents()
@@ -424,25 +414,21 @@ class TSPPopulation:
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
-        #intialize it as a list of one element which is the set of the first element routes (paths between each two cities)
         edges_to_check_wtih = [set((routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]) for i in range(len(routes[0][0])))]
-
-        #to find the first individual that not disjoint with the rest of the individuals
         for i in range(1, len(routes)):
             route_edges = set((routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]) for j in range(len(routes[i][0])))
             if all(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
                 edges_to_check_wtih.append(route_edges)
             else:
-                return routes[i][0], routes[i][1]    
+                return routes[i][0], routes[i][1]
 
-class BinPackPopulation:
+class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
+        super().__init__(size)
         self.items = [(index, weight) for index, weight in enumerate(items)]
-        self.size = size
         self.individuals = self.init_population()
         self.optimal = optimal
         self.bin_max = bin_max
-        self.parents = None #to store the parents selected by the SUS method
 
     def init_population(self):
         return [TSPIndividual(random.sample(self.items, len(self.items))) for _ in range(self.size)]
@@ -451,220 +437,9 @@ class BinPackPopulation:
         for ind in self.individuals:
             ind.calculate_fitness(None, self.optimal, self.bin_max)
 
-    def select_parents(self):
-        if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
-            return self.top_half_uniform_selection()
-        elif PARENT_SELECTION_METHOD == "RWS":
-            return self.rws_selection()
-        elif PARENT_SELECTION_METHOD == "TOURNAMENT_DET":
-            self.fitness_ranking()
-            return self.tournament_selection_deter()
-        elif PARENT_SELECTION_METHOD == "TOURNAMENT_STOCH":
-            self.fitness_ranking()
-            return self.tournament_selection_stoch()
-        elif PARENT_SELECTION_METHOD == "SUS":
-            return self.sus_selection()
-        else:
-            raise ValueError(f"Wrong parent selection method: {PARENT_SELECTION_METHOD}")
-    
-    #A function that selects a parent using Top Half Uniform
-    def top_half_uniform_selection(self):
-        rand = random.randint(0, len(self.individuals) // 2 - 1)
-        return rand, self.individuals[rand].genome
-    
-    #A function that selects a parent using RWS
-    def rws_selection(self):
-        #Scaling the fitness values using linear scaling
-        max_fitness = max(ind.fitness for ind in self.individuals)
-        scaled_fitnesses = linear_scaling(self.individuals, -1, max_fitness)
-        
-        #Converting fitness values to probabilities
-        total_scaled = sum(scaled_fitnesses)
-        selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
-        
-        if total_scaled == 0:
-            random_choice = random.randint(0, len(self.individuals) - 1)
-            return random_choice, self.individuals[random_choice].genome
-        
-        #Building the "roulete"
-        cumulative_probs = []
-        cumsum = 0
-        for prob in selection_probs:
-            cumsum += prob
-            cumulative_probs.append(cumsum)
-        
-        #Selecting a random individual
-        pick = random.random()
-        for i, prob in enumerate(cumulative_probs):
-            if pick < prob:
-                return i, self.individuals[i].genome
-        return len(self.individuals) - 1, self.individuals[-1].genome
-    
-    #A function that selects a list of parents using SUS
-    def sus_selection(self):
-        if not self.parents:
-            #Scaling the fitness values using linear scaling
-            max_fitness = max(ind.fitness for ind in self.individuals)
-            scaled_fitness = linear_scaling(self.individuals, -1, max_fitness)
-
-            #Converting fitness values to probabilities
-            total_fitness = sum(scaled_fitness)
-            if total_fitness == 0:
-                random_choice = random.randint(0, len(self.individuals) - 1)
-                return random_choice, self.individuals[random_choice].genome
-            
-            selection_probs = [fit / total_fitness for fit in scaled_fitness]
-            
-            #Building the "roulete"
-            cumulative_probs = []
-            cumsum = 0
-            for prob in selection_probs:
-                cumsum += prob
-                cumulative_probs.append(cumsum)
-
-            #Selecting a random starting point, then parents
-            target = random.random() 
-            self.parents = []
-            for j, prob in enumerate(cumulative_probs):
-                if target < prob:
-                    self.parents.append((j, self.individuals[j].genome))
-                    break
-
-        i1, p1 = self.parents[0]
-        self.parents = self.parents[1:] #removing the two chosen parents from the list
-        return i1, p1
-    
-    #A function that selects a parent using Deterministic Tournament Selection
-    def tournament_selection_deter(self):
-        tournament = random.sample(range(len(self.individuals)), TOURNAMENT_K) #choosing K random indices 
-        tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
-        return tournament[0], self.individuals[tournament[0]].genome
-    
-    #A function that selects a parent using Stochastic Tournament Selection
-    def tournament_selection_stoch(self):
-        tournament = random.sample(range(len(self.individuals)), TOURNAMENT_K) #choosing K random indices
-        tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
-        for i in range(TOURNAMENT_K):
-            if random.random() < TOURNAMENT_P: 
-                return tournament[i], self.individuals[tournament[i]].genome
-        return tournament[-1], self.individuals[tournament[-1]].genome
-    
-    def fitness_ranking(self):
-        sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
-        for rank, ind in enumerate(sorted_inds):
-           ind.rank = rank + 1
-
-    def crossover(self, p1, p2):
-        if CROSSOVER_TYPE == "PMX":
-            return self.pmx_crossover(p1, p2)
-        elif CROSSOVER_TYPE == "OX":
-            return self.order_crossover(p1, p2)
-        elif CROSSOVER_TYPE == "CX":
-            return self.cx_crossover(p1, p2)
-        elif CROSSOVER_TYPE == "ER":
-            return self.er_crossover(p1, p2)
-        else:
-            raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
-        
-    def order_crossover(self, p1, p2):
-        size = len(p1)
-        indices_to_copy = random.sample(range(size), size // 2)
-        child = [p1[i] if i in indices_to_copy else None for i in range(size)]
-        remaining_items = [p1[i] for i in range(size) if i not in indices_to_copy]
-        pos = 0
-        for i in range(size):
-            if child[i] is None:
-                while p2[pos] not in remaining_items:
-                    pos += 1
-                child[i] = p2[pos]
-                remaining_items.remove(p2[pos])
-                pos += 1
-        return TSPIndividual(child)
-    
-    def pmx_crossover(self, p1, p2):
-        size = len(p1)
-        indices_to_copy = random.sample(range(size), size // 2)
-        child = [p1[i] if i in indices_to_copy else None for i in range(size)]
-        for i in range(size):
-            if child[i] is None:
-                gene = p2[i]
-                while gene in child:
-                    index = p1.index(gene)
-                    gene = p2[index]
-                child[i] = gene
-        return TSPIndividual(child)
-    
-    def cx_crossover(self, p1, p2):
-        size = len(p1)
-        child = [None] * size
-        indices = list(range(size))
-        cycle = 0
-
-        while None in child:
-            start = indices[0]
-            idx = start
-            while True:
-                if cycle % 2 == 0:
-                    child[idx] = p1[idx]
-                else:
-                    child[idx] = p2[idx]
-                indices.remove(idx)
-                idx = p1.index(p2[idx])
-                if idx == start:
-                    break
-            cycle += 1
-
-        return TSPIndividual(child)
-    
-    def er_crossover(self, p1, p2):
-        size = len(p1)
-        child = []
-        used = set()
-
-        # Build a neighbor dictionary from both parents
-        def get_neighbors(p):
-            neighbors = {i: set() for i in p}
-            for i in range(len(p)):
-                a, b = p[i], p[(i+1) % size]
-                neighbors[a].add(b)
-                neighbors[b].add(a)
-            return neighbors
-
-        n1 = get_neighbors(p1)
-        n2 = get_neighbors(p2)
-
-        # Union both neighbor maps
-        neighbors = {k: n1[k].union(n2[k]) for k in n1}
-
-        # Start from a random city
-        current = random.choice(p1)
-        child.append(current)
-        used.add(current)
-
-        while len(child) < size:
-            common = n1[current].intersection(n2[current]) - used
-            if common:
-                next_city = min(common)
-            else:
-                # All neighbors from both parents excluding used ones
-                candidates = neighbors[current] - used
-                if candidates:
-                    next_city = min(candidates)
-                else:
-                    # Fallback: choose smallest unused city
-                    remaining = [c for c in p1 if c not in used]
-                    next_city = min(remaining)
-
-            child.append(next_city)
-            used.add(next_city)
-            current = next_city
-
-        return TSPIndividual(child)
-    
     def mate(self):
         self.evaluate_fitness()
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
-
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
             _, p2 = self.select_parents()
