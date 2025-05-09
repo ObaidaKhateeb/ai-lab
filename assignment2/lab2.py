@@ -5,8 +5,8 @@ import time
 
 #GA Parameters
 GA_POPSIZE = 2048 #Population size
-GA_MAXITER = 3000
-GA_TIMELIMIT = None
+GA_MAXITER = 3000 #Maximum number of generations
+GA_TIMELIMIT = None #Time limit (given as argument)
 GA_ELITRATE = 0.1 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
@@ -14,12 +14,11 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 #Problem (TSP, BIN_PACK)
 PROBLEM = "BIN_PACK"
 
-#Crossover mode (options: PMX, OX, CX, ER)
+#Crossover mode (PMX, OX, CX, ER)
 CROSSOVER_TYPE = "CX"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
-
 #Tournament Parameters
 TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
@@ -28,9 +27,9 @@ TOURNAMENT_P = 0.86
 MUTATION_TYPE = "inversion" 
 
 #Population-Based Mutation Control Parameters 
-MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER, NONE)
+POP_MUTATION_CONTROL_METHOD = "NONE" # (NON-LINEAR, TRIG-HYPER, NONE)
 TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
-HIGH_MUTATION_START_VAL = None
+HIGH_MUTATION_START_VAL = None #stores the best fitness value when the hypermutation is triggered
 
 #Individual-Based Mutation Control Parameters
 IND_MUTATION_CONTROL_METHOD = "NONE" # (FIT, AGE, NONE)
@@ -58,30 +57,40 @@ def read_tsp_file(filepath):
                     coords.append((float(x), float(y)))
     return coords
 
+#A function to extract the data from a binpack file
 def read_binpack_file(filepath):
     weights = []
     with open(filepath, 'r') as file:
         lines = file.readlines()
+
+    #extracting the bin size and optimal number of bins
     try: 
-        bin_max = int(lines[2].strip().split()[0])
+        data = lines[2].strip().split()
+        bin_max = int(data[0])
+        optimal = int(data[2])
     except ValueError:
         print("Error: Invalid Format")
         return None
+    
+    #extracting the items weights
     for line in lines[3:]:
         line = line.strip()
         if line.startswith('u'):
-            break  
+            break #stop reading weights
         if line: 
             weights.append(int(line))
 
-    return bin_max, weights
+    return bin_max, optimal, weights
 
-def read_opt_tour(filepath, coords):
+#A function to extract the TSP problem optimal tour length
+def read_opt_tour(filepath):
+
+    #detecting the optimal tour file
     opt_path = filepath.replace(".tsp", ".opt.tour")
-
     if not os.path.exists(opt_path):
         return None
 
+    #extracting the optimal tour length
     with open(opt_path, 'r') as file:
         for line in file:
             if line.startswith("COMMENT"):
@@ -92,21 +101,6 @@ def read_opt_tour(filepath, coords):
                     if num_str.isdigit():
                         return int(num_str)
     return None
-
-def read_opt_binpack(filepath):
-    with open(filepath, 'r') as file:
-        lines = file.readlines()
-
-    if len(lines) < 3:
-        return None
-
-    third_line = lines[2].strip()
-    parts = third_line.split()
-
-    if len(parts) >= 3 and parts[2].isdigit():
-        return int(parts[2])
-
-    return None 
 
 
 class TSPIndividual:
@@ -415,9 +409,9 @@ class BasePopulation:
     
     #A function for controlling the population-based mutation rate (section 2a)
     def mutaiton_control(self):
-        if MUTATION_CONTROL_METHOD == "NON-LINEAR": #Non-linear method
+        if POP_MUTATION_CONTROL_METHOD == "NON-LINEAR": #Non-linear method
             self.non_linear_mutation_policy()
-        elif MUTATION_CONTROL_METHOD == "TRIG-HYPER": #Triggered hypermutation method
+        elif POP_MUTATION_CONTROL_METHOD == "TRIG-HYPER": #Triggered hypermutation method
             self.trigger_hyper_mutation_policy()
 
     #A function that computes the population based mutation rate using the nonlinear policy (section 2a)
@@ -706,10 +700,9 @@ def main(filepath):
     #Extracting the coordinates from the file
     if PROBLEM == "TSP":
         items = read_tsp_file(filepath)
+        optimal = read_opt_tour(filepath)
     elif PROBLEM == "BIN_PACK":
-        bin_max, items = read_binpack_file(filepath)
-
-    optimal = read_opt_tour(filepath, items) if PROBLEM == "TSP" else read_opt_binpack(filepath)
+        bin_max, optimal, items = read_binpack_file(filepath)
 
     #Initializing the population
     population = TSPPopulation(items, GA_POPSIZE, optimal) if PROBLEM == "TSP" else BinPackPopulation(items, GA_POPSIZE, optimal, bin_max)
@@ -752,12 +745,12 @@ def main(filepath):
 
 if __name__ == "__main__":
 
-    #Check validity of the number of arguments
-    if len(os.sys.argv) != 3:
-        print("Usage: python lab2.py <time_limit> <tsp_file>")
+    #Checking validity of the number of arguments
+    if len(os.sys.argv) != 4:
+        print("Usage: python lab2.py <time_limit> <problem_type> <file_path>")
         exit(1)
 
-    #Check validity of the time limit (it should be a positive integer)
+    #Checking validity of the time limit (it should be a positive integer)
     try:
         GA_TIMELIMIT = int(os.sys.argv[1])
         if GA_TIMELIMIT <= 0:
@@ -766,8 +759,17 @@ if __name__ == "__main__":
         print("Time limit should be a positive integer.")
         exit(1)
 
+    #Extracting the problem type 
+    try:
+        PROBLEM = os.sys.argv[2]
+        if PROBLEM not in ["TSP", "BIN_PACK"]:
+            raise ValueError 
+    except ValueError:
+        print("Problem should be either TSP or BIN_PACK.")
+        exit(1)
+
     #Extracting the tsp file path and checking its validity
-    file_path = os.sys.argv[2]
+    file_path = os.sys.argv[3]
     if not os.path.exists(file_path):
         print(f"File {file_path} does not exist.")
         exit(1)
