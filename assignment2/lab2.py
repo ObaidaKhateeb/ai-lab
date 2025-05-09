@@ -25,12 +25,15 @@ TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "simple_inversion" 
+MUTATION_TYPE = "scramble" 
 
-#Mutation Control Parameters 
+#Population-Based Mutation Control Parameters 
 MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER)
 TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
 HIGH_MUTATION_START_VAL = None
+
+#Individual-Based Mutation Control Parameters
+IND_MUTATION_CONTROL_METHOD = "AGE" # (NONE, FIT, AGE)
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -106,6 +109,7 @@ class TSPIndividual:
         self.genome = genome  
         self.fitness = None
         self.rank = None
+        self.age = 0
 
     def calculate_fitness(self, dist_matrix, optimal_given =None, bin_size = None):
         path = self.genome
@@ -196,6 +200,18 @@ class BasePopulation:
 
     def evaluate_fitness(self):
         raise NotImplementedError
+
+    def fitness_ranking(self):
+        sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
+        for rank, ind in enumerate(sorted_inds):
+            ind.rank = rank + 1
+
+    def evaluate_relative_fitness(self): 
+        avg_fit = sum(ind.fitness for ind in self.individuals) / len(self.individuals)
+        relative_fitness = [ind.fitness / avg_fit for ind in self.individuals] #Computing relative fitness
+        SF = sum(relative_fitness)
+        relative_fitness_norm = [rfi / SF for rfi in relative_fitness] #normalizing the relative fitness
+        return relative_fitness_norm
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -292,11 +308,6 @@ class BasePopulation:
             if random.random() < TOURNAMENT_P:
                 return tournament[i], self.individuals[tournament[i]].genome
         return tournament[-1], self.individuals[tournament[-1]].genome
-
-    def fitness_ranking(self):
-        sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
-        for rank, ind in enumerate(sorted_inds):
-            ind.rank = rank + 1
 
     def crossover(self, p1, p2):
         if CROSSOVER_TYPE == "PMX":
@@ -399,14 +410,16 @@ class BasePopulation:
         std_dev = math.sqrt(variance) 
         self.std_devs.append(std_dev)
     
+    #A function for controlling the population-based mutation rate (section 2a)
     def mutaiton_control(self):
-        if MUTATION_CONTROL_METHOD == "NON-LINEAR":
+        if MUTATION_CONTROL_METHOD == "NON-LINEAR": #Non-linear method
             self.non_linear_mutation_policy()
-        elif MUTATION_CONTROL_METHOD == "TRIG-HYPER":
+        elif MUTATION_CONTROL_METHOD == "TRIG-HYPER": #Triggered hypermutation method
             self.trigger_hyper_mutation_policy()
         else:
             raise ValueError(f"Wrong mutation control method: {MUTATION_CONTROL_METHOD}")
 
+    #A function that computes the population based mutation rate using the nonlinear policy (section 2a)
     def non_linear_mutation_policy(self):
         global GA_MUTATIONRATE
 
@@ -426,6 +439,7 @@ class BasePopulation:
         GA_MUTATIONRATE = max(f_t , min_mutation_rate)
         print(f"Mutation rate: {GA_MUTATIONRATE:.2f}")
     
+    #A function that computes the population based mutation and uses the hypermutation policy (section 2a)
     def trigger_hyper_mutation_policy(self):
         global GA_MUTATIONRATE, TRIG_HYPER_TRIGGER, HIGH_MUTATION_START_VAL
         high_mutation = 0.5 
@@ -484,16 +498,44 @@ class TSPPopulation(BasePopulation):
         self.mutaiton_control()
 
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
+
+        #Increasing the age of the individuals
+        for ind in new_pop:
+            ind.age += 1
+
         while len(new_pop) < self.size:
             _, p1 = self.select_parents()
             _, p2 = self.select_parents()
             child = self.crossover(p1, p2)
-            if random.random() < GA_MUTATIONRATE:
-                child.mutate()
+
             child.calculate_fitness(self.dist_matrix, self.optimal)
             new_pop.append(child)
-        self.individuals = new_pop
 
+        #Mutation
+        if IND_MUTATION_CONTROL_METHOD == "FIT": #Fitness-based method
+            self.fit_based_ind_mutation()
+        elif IND_MUTATION_CONTROL_METHOD == "AGE": #Age-based method
+            self.age_based_ind_mutation()
+
+        self.individuals = new_pop
+    
+    #A function that mutates the individuals based on their fitness (section 2b)
+    def fit_based_ind_mutation(self):
+        relative_fitness = self.evaluate_relative_fitness()
+        for ind, rf in zip(self.individuals, relative_fitness):
+            mut_rate = max(0.05, GA_MUTATIONRATE * (1 - rf))
+            if random.random() < mut_rate:
+                ind.mutate()
+    
+    #A function that mutates the individuals based on their age (section 2b)
+    def age_based_ind_mutation(self):
+        p_min = 0.05
+        alpha = 0.05
+        for ind in self.individuals:
+            mutation_rate = min(GA_MUTATIONRATE, p_min + alpha * ind.age)
+            if random.random() < mutation_rate:
+                ind.mutate()
+        
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
@@ -510,8 +552,7 @@ class TSPPopulation(BasePopulation):
                 return routes[i][0], routes[i][1]
             else:
                 edges_to_check_wtih.append(route_edges)
-            
-
+    
 class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
         super().__init__(size)
@@ -605,26 +646,16 @@ def main(filepath):
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
     no_improvement_count = 0
-    no_valid_count = 0
-    best_found = None
+
     for gen in range(GA_MAXITER):
         population.mate()
         best = population.best_individual()
-        if best == None: 
-            no_valid_count += 1
-            print(f"Gen {gen:3}. Best = None")
-            if no_valid_count >= 50:
-                break
-            else:
-                continue
         
-        best_found = best
         #Check for convergence
         #global optimum check
         if best[1] == 0:
             print("Global optimum convergence.")
             break
-
         #local optimum check
         if best[1] < best_fit_so_far:
             best_fit_so_far = best[1]
@@ -642,10 +673,11 @@ def main(filepath):
 
         print(f"Gen {gen:3}. Best = {best[0]} ({best[1]:.2f})")
 
+    best = population.best_individual()
     print("\nBest tour:")
-    print(best_found[0])
-    print(f"Best Fitness Achieved: {best_found[1]:.2f}")
-    print(f"Best Distance Achieved: {best_found[1] + optimal:.2f}")
+    print(best[0])
+    print(f"Best Fitness Achieved: {best[1]:.2f}")
+    print(f"Best Distance Achieved: {best[1] + optimal:.2f}")
 
 if __name__ == "__main__":
 
