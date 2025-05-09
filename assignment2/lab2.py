@@ -15,7 +15,7 @@ NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 PROBLEM = "TSP"
 
 #Crossover mode (options: PMX, OX, CX, ER)
-CROSSOVER_TYPE = "CX"
+CROSSOVER_TYPE = "ER"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
@@ -28,8 +28,9 @@ TOURNAMENT_P = 0.86
 MUTATION_TYPE = "simple_inversion" 
 
 #Mutation Control Parameters 
-MUTATION_CONTROL_METHOD = "NON-LINEAR" # (NON-LINEAR, TRIG-HYPER)
-TRIG_HYPER_TRIGGER = "AVG_FIT" # (AVG_FIT, BEST_FIT, STD_FIT, IMP_FIT)
+MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER)
+TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
+HIGH_MUTATION_START_VAL = None
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -399,8 +400,12 @@ class BasePopulation:
         self.std_devs.append(std_dev)
     
     def mutaiton_control(self):
-        return
-        self.non_linear_mutation_policy()
+        if MUTATION_CONTROL_METHOD == "NON-LINEAR":
+            self.non_linear_mutation_policy()
+        elif MUTATION_CONTROL_METHOD == "TRIG-HYPER":
+            self.trigger_hyper_mutation_policy()
+        else:
+            raise ValueError(f"Wrong mutation control method: {MUTATION_CONTROL_METHOD}")
 
     def non_linear_mutation_policy(self):
         global GA_MUTATIONRATE
@@ -422,36 +427,37 @@ class BasePopulation:
         print(f"Mutation rate: {GA_MUTATIONRATE:.2f}")
     
     def trigger_hyper_mutation_policy(self):
-        global GA_MUTATIONRATE, TRIG_HYPER_TRIGGER
+        global GA_MUTATIONRATE, TRIG_HYPER_TRIGGER, HIGH_MUTATION_START_VAL
         high_mutation = 0.5 
         low_mutation = 0.25
+        k = 10 
         if TRIG_HYPER_TRIGGER == "BEST_FIT":
-            k = 10 
-            if len(self.best_fitness) > k and self.best_fitness[-1] == self.best_fitness[-k:]:
-                GA_MUTATIONRATE = high_mutation
-            else:
+            if HIGH_MUTATION_START_VAL and HIGH_MUTATION_START_VAL - self.best_fitness[-1] > HIGH_MUTATION_START_VAL * 0.01:
                 GA_MUTATIONRATE = low_mutation
+                HIGH_MUTATION_START_VAL = None
+            elif HIGH_MUTATION_START_VAL:
+                return
+            elif len(self.best_fitness) > k and self.best_fitness[-1] == self.best_fitness[-k]:
+                GA_MUTATIONRATE = high_mutation
+                HIGH_MUTATION_START_VAL = self.best_fitness[-1]
         elif TRIG_HYPER_TRIGGER == "AVG_FIT":
-            k = 10 
             epsilon = self.average_fitness[-1] * 0.01
-            if len(self.average_fitness) > k and self.average_fitness[-1] - self.average_fitness[-k:] < epsilon:
-                GA_MUTATIONRATE = high_mutation
-            else:
+            if HIGH_MUTATION_START_VAL and HIGH_MUTATION_START_VAL - self.average_fitness[-1] > HIGH_MUTATION_START_VAL * 0.01:
                 GA_MUTATIONRATE = low_mutation
+                HIGH_MUTATION_START_VAL = None
+            elif HIGH_MUTATION_START_VAL:
+                return
+            elif len(self.average_fitness) > k and self.average_fitness[-1] - self.average_fitness[-k] < epsilon:
+                GA_MUTATIONRATE = high_mutation
         elif TRIG_HYPER_TRIGGER == "STD_FIT":
-            k = 10 
             epsilon = self.std_devs[-1] * 0.01
-            if len(self.std_devs) > k and self.std_devs[-1] - self.std_devs[-k:] < epsilon:
-                GA_MUTATIONRATE = high_mutation
-            else:
+            if HIGH_MUTATION_START_VAL and HIGH_MUTATION_START_VAL - self.std_devs[-1] > HIGH_MUTATION_START_VAL * 0.01:
                 GA_MUTATIONRATE = low_mutation
-        
-            
-            
-            
-
-
-    
+                HIGH_MUTATION_START_VAL = None
+            elif HIGH_MUTATION_START_VAL:
+                return
+            elif len(self.std_devs) > k and self.std_devs[-1] - self.std_devs[-k] < epsilon:
+                GA_MUTATIONRATE = high_mutation
 
 
 
@@ -491,14 +497,20 @@ class TSPPopulation(BasePopulation):
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
-        edges_to_check_with = [set(edge for i in range(len(routes[0][0])) for edge in [(routes[0][0][i], routes[0][0][(i + 1) % len(routes[0][0])]),(routes[0][0][(i + 1) % len(routes[0][0])], routes[0][0][i])])]
-        for i in range(1, len(routes)):
-            route_edges = set(edge for j in range(len(routes[i][0])) for edge in [(routes[i][0][j], routes[i][0][(j + 1) % len(routes[i][0])]), (routes[i][0][(j + 1) % len(routes[i][0])], routes[i][0][j])])
-            if any(route_edges.isdisjoint(edges) for edges in edges_to_check_with):
-                edges_to_check_with.append(route_edges)
-            else:
+        edges_to_check_wtih = []
+        for i in range(len(routes)):
+            route_edges = set()
+            for j in range(len(routes[i][0])):
+                a = routes[i][0][j]
+                b = routes[i][0][(j + 1) % len(routes[i][0])]
+                route_edges.add((a, b))
+                route_edges.add((b, a))
+            if any(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
+                print(f"Best index is {i}")
                 return routes[i][0], routes[i][1]
-
+            else:
+                edges_to_check_wtih.append(route_edges)
+            
 
 class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
@@ -634,37 +646,6 @@ def main(filepath):
     print(best_found[0])
     print(f"Best Fitness Achieved: {best_found[1]:.2f}")
     print(f"Best Distance Achieved: {best_found[1] + optimal:.2f}")
-
-def run_ga_from_data_binpack(weights, bin_max, optimal, time_limit):
-    global GA_TIMELIMIT
-    GA_TIMELIMIT = time_limit
-    population = BinPackPopulation(weights, GA_POPSIZE, optimal, bin_max)
-
-    best_fit_so_far = float('inf')
-    no_improvement_count = 0
-    start_time = time.time()
-
-    for gen in range(GA_MAXITER):
-        population.mate()
-        best = population.best_individual()
-        if isinstance(best, tuple):
-            fitness = best[1]
-        else:
-            fitness = best[1]
-
-        if fitness == 0:
-            break
-        if fitness < best_fit_so_far:
-            best_fit_so_far = fitness
-            no_improvement_count = 0
-        else:
-            no_improvement_count += 1
-        if no_improvement_count > NO_IMPROVEMENT_LIMIT:
-            break
-        if time.time() - start_time > GA_TIMELIMIT:
-            break
-
-    return fitness
 
 if __name__ == "__main__":
 
