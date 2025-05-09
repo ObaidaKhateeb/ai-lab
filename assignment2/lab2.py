@@ -8,7 +8,7 @@ GA_POPSIZE = 2048 #Population size
 GA_MAXITER = 3000
 GA_TIMELIMIT = None
 GA_ELITRATE = 0.05 #Elitism rate
-GA_MUTATIONRATE = 0.25 #Mutation rate
+GA_MUTATIONRATE = 0.5 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Problem (TSP, BIN_PACK)
@@ -25,15 +25,15 @@ TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "scramble" 
+MUTATION_TYPE = "simple_inversion" 
 
 #Population-Based Mutation Control Parameters 
-MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER)
+MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER, NONE)
 TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
 HIGH_MUTATION_START_VAL = None
 
 #Individual-Based Mutation Control Parameters
-IND_MUTATION_CONTROL_METHOD = "FIT" # (NONE, FIT, AGE)
+IND_MUTATION_CONTROL_METHOD = "FIT" # (FIT, AGE, NONE)
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -318,8 +318,6 @@ class BasePopulation:
             return self.cx_crossover(p1, p2)
         elif CROSSOVER_TYPE == "ER":
             return self.er_crossover(p1, p2)
-        else:
-            raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
 
     def order_crossover(self, p1, p2):
         size = len(p1)
@@ -416,8 +414,6 @@ class BasePopulation:
             self.non_linear_mutation_policy()
         elif MUTATION_CONTROL_METHOD == "TRIG-HYPER": #Triggered hypermutation method
             self.trigger_hyper_mutation_policy()
-        else:
-            raise ValueError(f"Wrong mutation control method: {MUTATION_CONTROL_METHOD}")
 
     #A function that computes the population based mutation rate using the nonlinear policy (section 2a)
     def non_linear_mutation_policy(self):
@@ -663,7 +659,7 @@ def main(filepath):
             print("Global optimum convergence.")
             break
         #local optimum check
-        if best[1] < best_fit_so_far:
+        if best[1] != best_fit_so_far:
             best_fit_so_far = best[1]
             no_improvement_count = 0
         else:
