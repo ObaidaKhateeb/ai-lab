@@ -694,6 +694,7 @@ def linear_scaling(individuals, a,b):
 # -------- Main Runner --------
 
 def main(filepath):
+
     #Initializing the time
     start_time = time.time()
 
@@ -709,6 +710,7 @@ def main(filepath):
 
     #Initiallizing variables to detect local convergence
     best_fit_so_far = float('inf')
+    best_gen_so_far = None
     no_improvement_count = 0
 
     for gen in range(GA_MAXITER):
@@ -717,11 +719,12 @@ def main(filepath):
         
         #Check for convergence
         #global optimum check
-        if best[1] == 0:
+        if best and best[1] == 0:
             print("Global optimum convergence.")
             break
         #local optimum check
-        if best[1] != best_fit_so_far:
+        if best and best[1] < best_fit_so_far:
+            best_gen_so_far = best[0]
             best_fit_so_far = best[1]
             no_improvement_count = 0
         else:
@@ -729,19 +732,22 @@ def main(filepath):
         if no_improvement_count > NO_IMPROVEMENT_LIMIT:
             print("No improvement => Local optimum convergence.")
             break
+
         #time exceeded check
         if time.time() - start_time > GA_TIMELIMIT:
             print("Time limit exceeded.")
             break
 
+        #Printing the best genome and its fitness achieved in the current generation
+        best_genome = best[0] if best else None
+        best_fitness = round(best[1], 2) if best else None 
+        print(f"Gen {gen:3}. Best = {best_genome} ({best_fitness})")
 
-        print(f"Gen {gen:3}. Best = {best[0]} ({best[1]:.2f})")
-
-    best = population.best_individual()
+    #printing the best results achieved throughout the generations
     print("\nBest tour:")
-    print(best[0])
-    print(f"Best Fitness Achieved: {best[1]:.2f}")
-    print(f"Best Distance Achieved: {best[1] + optimal:.2f}")
+    print(best_gen_so_far)
+    print(f"Best Fitness Achieved: {best_fit_so_far:.2f}")
+    print(f"Best Distance Achieved: {best_fit_so_far + optimal:.2f}")
 
 if __name__ == "__main__":
 
