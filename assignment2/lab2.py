@@ -7,15 +7,15 @@ import time
 GA_POPSIZE = 2048 #Population size
 GA_MAXITER = 3000
 GA_TIMELIMIT = None
-GA_ELITRATE = 0.05 #Elitism rate
-GA_MUTATIONRATE = 0.5 #Mutation rate
+GA_ELITRATE = 0.1 #Elitism rate
+GA_MUTATIONRATE = 0.25 #Mutation rate
 NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
 
 #Problem (TSP, BIN_PACK)
-PROBLEM = "TSP"
+PROBLEM = "BIN_PACK"
 
 #Crossover mode (options: PMX, OX, CX, ER)
-CROSSOVER_TYPE = "ER"
+CROSSOVER_TYPE = "CX"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM"
@@ -25,7 +25,7 @@ TOURNAMENT_K = 49
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "simple_inversion" 
+MUTATION_TYPE = "inversion" 
 
 #Population-Based Mutation Control Parameters 
 MUTATION_CONTROL_METHOD = "TRIG-HYPER" # (NON-LINEAR, TRIG-HYPER, NONE)
@@ -33,7 +33,12 @@ TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
 HIGH_MUTATION_START_VAL = None
 
 #Individual-Based Mutation Control Parameters
-IND_MUTATION_CONTROL_METHOD = "FIT" # (FIT, AGE, NONE)
+IND_MUTATION_CONTROL_METHOD = "NONE" # (FIT, AGE, NONE)
+
+#Fitness Computation Mode
+FITNESS_COMPUTATION_MODE = "NONE" # (STATIC, NOVELITY, AGE)
+WEIGHT_FACTOR = 0.5 #Weight given for static (traditional) fitness
+NOVELITY_K = 10 #Novelity-Based number of neighbors
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -126,7 +131,7 @@ class TSPIndividual:
                 if bin_sum > bin_size:
                     total_bins += 1
                     bin_sum = weight
-            self.fitness = total_bins - optimal         
+            self.fitness = total_bins - optimal 
 
     def mutate(self):
         if MUTATION_TYPE == "displacement":
@@ -500,10 +505,41 @@ class TSPPopulation(BasePopulation):
         return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)]
 
     def evaluate_fitness(self):
+
         for ind in self.individuals:
             ind.calculate_fitness(self.dist_matrix, self.optimal)
 
+        if FITNESS_COMPUTATION_MODE == "NOVELITY":
+            #find for each individual the edges 
+            edges = []
+            for ind in self.individuals:
+                route_edges = set()
+                for j in range(len(ind.genome)):
+                    a = ind.genome[j]
+                    b = ind.genome[(j + 1) % len(ind.genome)]
+                    route_edges.add((a, b))
+                    route_edges.add((b, a))
+                edges.append(route_edges)
+            #find the k nearest neighbors based on the number of intersection in edges 
+            for j, ind in enumerate(self.individuals):
+                neighbors = []
+                for i in range(len(edges)):
+                    #find the number of intersections
+                    intersection = len(edges[i].intersection(edges[j]))
+                    neighbors.append((i, intersection))
+                neighbors.sort(key=lambda x: x[1], reverse=True)
+                #find the k nearest neighbors
+                k_neighbors = neighbors[1:NOVELITY_K+1]
+                #compute the novelty score
+                novelty_score = - sum([x[1] for x in k_neighbors]) / NOVELITY_K
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * novelty_score
+
+        elif FITNESS_COMPUTATION_MODE == "AGE":
+            for ind in self.individuals:
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
+
     def mate(self):
+
         self.evaluate_fitness()
 
         #Evaluating the population stats and adjusting the mutation rate
@@ -511,7 +547,7 @@ class TSPPopulation(BasePopulation):
         self.mutaiton_control()
 
         new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
-
+        
         #Increasing the age of the individuals
         for ind in new_pop:
             ind.age += 1
@@ -536,6 +572,7 @@ class TSPPopulation(BasePopulation):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
         edges_to_check_wtih = []
+        print(f"Best fitness is {routes[0][1]}")
         for i in range(len(routes)):
             route_edges = set()
             for j in range(len(routes[i][0])):
@@ -563,6 +600,41 @@ class BinPackPopulation(BasePopulation):
     def evaluate_fitness(self):
         for ind in self.individuals:
             ind.calculate_fitness(None, self.optimal, self.bin_max)
+
+        if FITNESS_COMPUTATION_MODE == "NOVELITY":
+            #find for each individual the bins 
+            population_bins = []
+            for ind in self.individuals:
+                ind_bins = set()
+                current_weight = 0
+                for item in ind.genome:
+                    item_weight = item[1]
+                    if current_weight + item_weight <= self.bin_max:
+                        current_weight += item_weight
+                    else:
+                        ind_bins.add(current_weight)
+                        current_weight = item_weight
+                if current_weight > 0:
+                    ind_bins.add(current_weight)
+                population_bins.append(ind_bins)
+
+            #find the k nearest neighbors based on the number of shared bins 
+            for j, ind in enumerate(self.individuals):
+                neighbors = []
+                for i in range(len(population_bins)):
+                    #find the number of shared bins
+                    intersection = len(population_bins[i].intersection(population_bins[j]))
+                    neighbors.append((i, intersection))
+                neighbors.sort(key=lambda x: x[1], reverse=True)
+                #find the k nearest neighbors
+                k_neighbors = neighbors[:NOVELITY_K]
+                #compute the novelty score
+                novelty_score = - sum([x[1] for x in k_neighbors]) / NOVELITY_K
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * novelty_score
+
+        elif FITNESS_COMPUTATION_MODE == "AGE":
+            for ind in self.individuals:
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
 
     def mate(self):
         self.evaluate_fitness()
@@ -619,9 +691,6 @@ def compute_distance_matrix(coords):
             if i != j:
                 matrix[i][j] = euclidean_distance(coords[i], coords[j])
     return matrix
-
-
-
 
 
 #A function that linearly scales the fitness values 
