@@ -33,7 +33,7 @@ TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
 HIGH_MUTATION_START_VAL = None
 
 #Individual-Based Mutation Control Parameters
-IND_MUTATION_CONTROL_METHOD = "AGE" # (NONE, FIT, AGE)
+IND_MUTATION_CONTROL_METHOD = "FIT" # (NONE, FIT, AGE)
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -473,6 +473,23 @@ class BasePopulation:
             elif len(self.std_devs) > k and self.std_devs[-1] - self.std_devs[-k] < epsilon:
                 GA_MUTATIONRATE = high_mutation
 
+    #A function that mutates the individuals based on their fitness (section 2b)
+    def fit_based_ind_mutation(self):
+        relative_fitness = self.evaluate_relative_fitness()
+        for ind, rf in zip(self.individuals, relative_fitness):
+            mut_rate = max(0.05, GA_MUTATIONRATE * (1 - rf))
+            if random.random() < mut_rate:
+                ind.mutate()
+    
+    #A function that mutates the individuals based on their age (section 2b)
+    def age_based_ind_mutation(self):
+        p_min = 0.05
+        alpha = 0.05
+        for ind in self.individuals:
+            mutation_rate = min(GA_MUTATIONRATE, p_min + alpha * ind.age)
+            if random.random() < mutation_rate:
+                ind.mutate()
+
 
 
 class TSPPopulation(BasePopulation):
@@ -511,31 +528,14 @@ class TSPPopulation(BasePopulation):
             child.calculate_fitness(self.dist_matrix, self.optimal)
             new_pop.append(child)
 
+        self.individuals = new_pop
+
         #Mutation
         if IND_MUTATION_CONTROL_METHOD == "FIT": #Fitness-based method
             self.fit_based_ind_mutation()
         elif IND_MUTATION_CONTROL_METHOD == "AGE": #Age-based method
             self.age_based_ind_mutation()
-
-        self.individuals = new_pop
     
-    #A function that mutates the individuals based on their fitness (section 2b)
-    def fit_based_ind_mutation(self):
-        relative_fitness = self.evaluate_relative_fitness()
-        for ind, rf in zip(self.individuals, relative_fitness):
-            mut_rate = max(0.05, GA_MUTATIONRATE * (1 - rf))
-            if random.random() < mut_rate:
-                ind.mutate()
-    
-    #A function that mutates the individuals based on their age (section 2b)
-    def age_based_ind_mutation(self):
-        p_min = 0.05
-        alpha = 0.05
-        for ind in self.individuals:
-            mutation_rate = min(GA_MUTATIONRATE, p_min + alpha * ind.age)
-            if random.random() < mutation_rate:
-                ind.mutate()
-        
     def best_individual(self):
         routes = [(ind.genome, ind.fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
@@ -580,11 +580,17 @@ class BinPackPopulation(BasePopulation):
             _, p1 = self.select_parents()
             _, p2 = self.select_parents()
             child = self.crossover(p1, p2)
-            if random.random() < GA_MUTATIONRATE:
-                child.mutate()
+
             child.calculate_fitness(None, self.optimal, self.bin_max)
             new_pop.append(child)
+            
         self.individuals = new_pop
+
+        #Mutation
+        if IND_MUTATION_CONTROL_METHOD == "FIT": #Fitness-based method
+            self.fit_based_ind_mutation()
+        elif IND_MUTATION_CONTROL_METHOD == "AGE": #Age-based method
+            self.age_based_ind_mutation()
 
     def best_individual(self):
         best = min(self.individuals, key=lambda ind: ind.fitness)
