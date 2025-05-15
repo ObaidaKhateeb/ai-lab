@@ -31,11 +31,11 @@ TOURNAMENT_P = 0.86
 MUTATION_TYPE = "insertion"
 
 # Mutation Control Methods
-POP_MUTATION_CONTROL_METHOD = "TRIG-HYPER"  # Options: "NON-LINEAR", "TRIG-HYPER", "NONE"
+POP_MUTATION_CONTROL_METHOD = "NONE"  # Options: "NON-LINEAR", "TRIG-HYPER", "NONE"
 TRIG_HYPER_TRIGGER = "BEST_FIT"       # Options: "AVG_FIT", "BEST_FIT", "STD_FIT"
 HIGH_MUTATION_START_VAL = None        # Internal trigger tracking
 
-IND_MUTATION_CONTROL_METHOD = "AGE"  # Options: "FIT", "AGE", "NONE"
+IND_MUTATION_CONTROL_METHOD = "NONE"  # Options: "FIT", "AGE", "NONE"
 
 #Fitness Computation Mode
 FITNESS_COMPUTATION_MODE = "NONE"  # (NONE, AGE, NOVELITY)
@@ -177,27 +177,16 @@ class TSPIndividual(BaseIndividual):
         self.fitness = self.raw_fitness
 
     def mutate(self):
+        fn = getattr(self, f"{MUTATION_TYPE}_mutate")
         tour1, tour2 = self.genome
-        self.original_tour1 = tour1[:]
-        self.original_tour2 = tour2[:]
-        max_attempts = 1000
-
-        def mutate_pair(t1, t2):
-            fn = getattr(self, f"{MUTATION_TYPE}_mutate")
-            return fn(t1), fn(t2)
-
-        def are_edge_disjoint(t1, t2):
-            def edges(tour):
-                return set([(tour[i], tour[(i + 1) % len(tour)]) for i in range(len(tour))] +
-                           [(tour[(i + 1) % len(tour)], tour[i]) for i in range(len(tour))])
-            return edges(t1).isdisjoint(edges(t2))
-
-        new_tour1, new_tour2 = mutate_pair(tour1[:], tour2[:])
-        if are_edge_disjoint(new_tour1, new_tour2):
+        new_tour1, new_tour2 = fn(tour1), fn(tour2)
+        new_tour1_edges = set([(new_tour1[i], new_tour1[(i + 1) % len(new_tour1)]) for i in range(len(new_tour1))] + 
+                               [(new_tour1[(i + 1) % len(new_tour1)], new_tour1[i]) for i in range(len(new_tour1))])
+        new_tour2_edges = set([(new_tour2[i], new_tour2[(i + 1) % len(new_tour2)]) for i in range(len(new_tour2))] +
+                               [(new_tour2[(i + 1) % len(new_tour2)], new_tour2[i]) for i in range(len(new_tour2))])
+        if new_tour1_edges.isdisjoint(new_tour2_edges):
             self.fitness += 1000
         self.genome = (new_tour1, new_tour2)
-
-#----------------------------------------------------------------------------
 
 class BinPackIndividual(BaseIndividual):
     def __init__(self, genome):
@@ -220,8 +209,6 @@ class BinPackIndividual(BaseIndividual):
         fn = getattr(self, f"{MUTATION_TYPE}_mutate")
         self.genome = fn(self.genome)
 
-#----------------------------------------------------------------------------
-
 class BasePopulation:
     def __init__(self, size):
         self.size = size
@@ -230,7 +217,6 @@ class BasePopulation:
         self.average_fitness = []
         self.best_fitness = []
         self.std_devs = []
-
 
     def evaluate_fitness(self):
         raise NotImplementedError
@@ -248,8 +234,6 @@ class BasePopulation:
             return self.tournament_selection_stoch()
         elif PARENT_SELECTION_METHOD == "SUS":
             return self.sus_selection()
-        else:
-            raise ValueError(f"Wrong parent selection method: {PARENT_SELECTION_METHOD}")
 
     #A function that selects a parent using Top Half Uniform
     def top_half_uniform_selection(self):
@@ -345,8 +329,6 @@ class BasePopulation:
             return self.cx_crossover(p1, p2)
         elif CROSSOVER_TYPE == "ER":
             return self.er_crossover(p1, p2)
-        else:
-            raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
 
     def order_crossover(self, p1, p2):
         size = len(p1)
@@ -618,7 +600,7 @@ class TSPPopulation(BasePopulation):
 
 
 
-    def build_disjoint_tour(self, tour1, max_attempts=2000):
+    def build_disjoint_tour(self, tour1, max_attempts=20000):
         n = len(tour1)
         used_edges = set((min(tour1[i], tour1[(i + 1) % n]), max(tour1[i], tour1[(i + 1) % n])) for i in range(n))
 
@@ -761,18 +743,40 @@ class TSPPopulation(BasePopulation):
         best = min(self.individuals, key=lambda ind: ind.raw_fitness if ENABLE_FITNESS_SHARING else ind.fitness)
         return best.genome, best.raw_fitness if ENABLE_FITNESS_SHARING else best.fitness
 
-#----------------------------------------------------------------------------
-
 class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
         super().__init__(size)
         self.items = [(index, weight) for index, weight in enumerate(items)]
-        self.individuals = self.init_population()
         self.optimal = optimal
         self.bin_max = bin_max
+        self.individuals = self.init_population()
+
 
     def init_population(self):
-        return [BinPackIndividual(random.sample(self.items, len(self.items))) for _ in range(self.size)]
+        x = int(0.3 * self.size)  # best fit count
+        y = int(0.3 * self.size)  # random fit count
+        z = self.size - x - y     # first fit count
+
+        population = []
+
+        # Best Fit
+        for _ in range(x):
+            genome = best_fit(self.items, self.bin_max)
+            population.append(BinPackIndividual(genome))
+
+        # Random Fit
+        for _ in range(y):
+            genome = [(i, w) for i, w in self.items]
+            random.shuffle(genome)
+            population.append(BinPackIndividual(genome))
+
+        # First Fit
+        for _ in range(z):
+            genome = first_fit(self.items, self.bin_max)
+            population.append(BinPackIndividual(genome))
+
+        return population
+
 
     def evaluate_fitness(self):
         for ind in self.individuals:
@@ -859,8 +863,6 @@ class BinPackPopulation(BasePopulation):
             bins.append(current_bin)
         return bins, best.raw_fitness
 
-#----------------------------------------------------------------------------
-
 def euclidean_distance(a, b):
     return round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
 
@@ -929,6 +931,48 @@ def linear_scaling(individuals, a,b):
     scaled_fitness = [a * ind.fitness + b for ind in individuals]
     return scaled_fitness
 
+
+def first_fit(items, bin_capacity):
+    shuffled = items[:]
+    random.shuffle(shuffled)
+    bins = []
+
+    for item in shuffled:
+        placed = False
+        for bin in bins:
+            if sum(w for _, w in bin) + item[1] <= bin_capacity:
+                bin.append(item)
+                placed = True
+                break
+        if not placed:
+            bins.append([item])
+
+    flat = [item for bin in bins for item in bin]
+    return flat
+
+def best_fit(items, bin_capacity):
+    shuffled = items[:]
+    random.shuffle(shuffled)
+    bins = []
+
+    for item in shuffled:
+        best_bin_index = -1
+        min_space_left = bin_capacity + 1
+        for i, bin in enumerate(bins):
+            space_left = bin_capacity - sum(w for _, w in bin)
+            if space_left >= item[1] and space_left - item[1] < min_space_left:
+                best_bin_index = i
+                min_space_left = space_left - item[1]
+        if best_bin_index == -1:
+            bins.append([item])
+        else:
+            bins[best_bin_index].append(item)
+
+    flat = [item for bin in bins for item in bin]
+    return flat
+
+
+
 def main(filepath):
 
     #Initializing the time
@@ -962,7 +1006,6 @@ def main(filepath):
         if best and best[1] < best_fit_so_far:
             best_gen_so_far = best[0]
             best_fit_so_far = best[1]
-            best_adaptive_fit_so_far = best[1]
             no_improvement_count = 0
         else:
             no_improvement_count += 1
@@ -984,7 +1027,7 @@ def main(filepath):
     #printing the best results achieved throughout the generations
     print("\nBest tour:")
     print(best_gen_so_far)
-    print(f"Best Fitness Achieved: {best_adaptive_fit_so_far:.2f}")
+    print(f"Best Fitness Achieved: {best_fit_so_far:.2f}")
     print(f"Best Distance Achieved: {best_fit_so_far + optimal:.2f}")
 
 if __name__ == "__main__":
@@ -1019,3 +1062,5 @@ if __name__ == "__main__":
         exit(1)
 
     main(file_path)
+
+
