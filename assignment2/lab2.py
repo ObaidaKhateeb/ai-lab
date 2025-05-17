@@ -1,56 +1,65 @@
-import random
 import math
-import os 
+import os
 import time
+from scipy.stats import kendalltau
 from scipy.optimize import linear_sum_assignment
 import numpy as np
+import random
+
 
 #GA Parameters
 GA_POPSIZE = 512 #Population size
-GA_MAXITER = 3000 #Maximum number of generations
-GA_TIMELIMIT = None #Time limit (given as argument)
+GA_MAXITER = 3000
+GA_TIMELIMIT = None
 GA_ELITRATE = 0.05 #Elitism rate
 GA_MUTATIONRATE = 0.25 #Mutation rate
-NO_IMPROVEMENT_LIMIT = 50  #Local optimum threshold
+NO_IMPROVEMENT_LIMIT = 200  #Local optimum threshold
 
 #Problem (TSP, BIN_PACK)
 PROBLEM = "BIN_PACK"
 
-#Crossover mode (PMX, OX, CX, ER)
-CROSSOVER_TYPE = "ER"
+#Crossover mode (options: PMX, OX, CX, ER)
+CROSSOVER_TYPE = "OX"
 
 #Parent selection method (TOP_HALF_UNIFORM ,RWS, SUS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET"
+
 #Tournament Parameters
-TOURNAMENT_K = 49
+TOURNAMENT_K = 15
 TOURNAMENT_P = 0.86
 
 #Mutation types (displacement, swap, insertion, simple_inversion, inversion, scramble)
-MUTATION_TYPE = "insertion" 
+MUTATION_TYPE = "insertion"
 
-#Population-Based Mutation Control Parameters 
-POP_MUTATION_CONTROL_METHOD = "NONE" # (NON-LINEAR, TRIG-HYPER, NONE)
-TRIG_HYPER_TRIGGER = "BEST_FIT" # (AVG_FIT, BEST_FIT, STD_FIT
-HIGH_MUTATION_START_VAL = None #stores the best fitness value when the hypermutation is triggered
+# Mutation Control Methods
+POP_MUTATION_CONTROL_METHOD = "TRIG-HYPER"  # Options: "NON-LINEAR", "TRIG-HYPER", "NONE"
+TRIG_HYPER_TRIGGER = "AVG_FIT"       # Options: "AVG_FIT", "BEST_FIT", "STD_FIT"
+HIGH_MUTATION_START_VAL = None        # Internal trigger tracking
 
-#Individual-Based Mutation Control Parameters
-IND_MUTATION_CONTROL_METHOD = "NONE" # (FIT, AGE, NONE)
+IND_MUTATION_CONTROL_METHOD = "FIT"  # Options: "FIT", "AGE", "NONE"
 
 #Fitness Computation Mode
-FITNESS_COMPUTATION_MODE = "NONE" # (STATIC, NOVELITY, AGE)
-WEIGHT_FACTOR = 0.5 #Weight given for static (traditional) fitness
-NOVELITY_K = 10 #Novelity-Based number of neighbors
+FITNESS_COMPUTATION_MODE = "AGE"  # (NONE, AGE, NOVELITY)
+WEIGHT_FACTOR = 0.5
+NOVELITY_K = 10
 
-#Niche Parameters
-NICHE_METHOD_USE = False 
-NICHE_SIGMA = 0.5 #Niche radius
-NICHE_ALPHA = 1.0 
+NICHE_METHOD_USE = False  # Enables or disables fitness sharing
+ENABLE_THRESHOLD_SPECIATION = False  # Switch True / False this to use Threshold Speciation
 
-#Threshold Speciation Parameters
-SPECIES_THRESHOLD_USE = True
-SPECIES_TARGET_COUNT = 10
+
+NICHE_SIGMA =0.3         # Niche radius
+NICHE_ALPHA = 1.0         # Sharing function exponent
+
+
+SPECIES_TARGET_COUNT = 20
 SPECIES_THRESHOLD = 0.05
 THRESHOLD_ADJUST_RATE = 0.1
+
+
+LAB1_REPACK = True # Switch True / False
+
+
+#----------------------------------------------------------------------------
 
 #A function to extract the data from a csv file 
 def read_tsp_file(filepath):
@@ -115,6 +124,8 @@ def read_opt_tour(filepath):
                         return int(num_str)
     return None
 
+#----------------------------------------------------------------------------
+
 class BaseIndividual:
     def __init__(self, genome):
         self.genome = genome
@@ -122,81 +133,103 @@ class BaseIndividual:
         self.raw_fitness = None
         self.rank = None
         self.age = 0
-        self.species_id = -1
+        self.specie = None
 
     def mutate(self):
-        if MUTATION_TYPE == "displacement":
-            self.displacement_mutate()
-        elif MUTATION_TYPE == "swap":
-            self.swap_mutate()
-        elif MUTATION_TYPE == "insertion":
-            self.insertion_mutate()
-        elif MUTATION_TYPE == "simple_inversion":
-            self.simple_inversion_mutate()
-        elif MUTATION_TYPE == "inversion":
-            self.inversion_mutate()
-        elif MUTATION_TYPE == "scramble":
-            self.scramble_mutate()
-        else:
-            raise ValueError(f"Wrong mutation type: {MUTATION_TYPE}")
+        raise NotImplementedError
 
-    def displacement_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        if i > j:
-            i, j = j, i
-        segment = self.genome[i:j + 1]
-        reimaner = self.genome[:i] + self.genome[j + 1:]
-        insertion_place = random.randint(0, len(reimaner))
-        self.genome = reimaner[:insertion_place] + segment + reimaner[insertion_place:]
+    def calculate_fitness(self, *args, **kwargs):
+        raise NotImplementedError
 
-    def swap_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        self.genome[i], self.genome[j] = self.genome[j], self.genome[i]
+    def displacement_mutate(self, seq):
+        i, j = sorted(random.sample(range(len(seq)), 2))
+        segment = seq[i:j + 1]
+        remainder = seq[:i] + seq[j + 1:]
+        insert_pos = random.randint(0, len(remainder))
+        return remainder[:insert_pos] + segment + remainder[insert_pos:]
 
-    def insertion_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        gene = self.genome.pop(i)
-        self.genome.insert(j, gene)
+    def swap_mutate(self, seq):
+        seq = seq[:]
+        i, j = random.sample(range(len(seq)), 2)
+        seq[i], seq[j] = seq[j], seq[i]
+        return seq
 
-    def simple_inversion_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        if i > j:
-            i, j = j, i
-        segment = self.genome[i:j + 1]
+    def insertion_mutate(self, seq):
+        seq = seq[:]
+        i, j = random.sample(range(len(seq)), 2)
+        gene = seq.pop(i)
+        seq.insert(j, gene)
+        return seq
+
+    def simple_inversion_mutate(self, seq):
+        seq = seq[:]
+        i, j = sorted(random.sample(range(len(seq)), 2))
+        seq[i:j + 1] = reversed(seq[i:j + 1])
+        return seq
+
+    def inversion_mutate(self, seq):
+        i, j = sorted(random.sample(range(len(seq)), 2))
+        segment = seq[i:j + 1]
         segment.reverse()
-        self.genome = self.genome[:i] + segment + self.genome[j + 1:]
+        remainder = seq[:i] + seq[j + 1:]
+        insert_pos = random.randint(0, len(remainder))
+        return remainder[:insert_pos] + segment + remainder[insert_pos:]
 
-    def inversion_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        if i > j:
-            i, j = j, i
-        segment = self.genome[i:j + 1]
-        segment.reverse()
-        reimaner = self.genome[:i] + self.genome[j + 1:]
-        insertion_place = random.randint(0, len(reimaner))
-        self.genome = reimaner[:insertion_place] + segment + reimaner[insertion_place:]
-
-    def scramble_mutate(self):
-        i, j = random.sample(range(len(self.genome)), 2)
-        if i > j:
-            i, j = j, i
-        segment = self.genome[i:j + 1]
+    def scramble_mutate(self, seq):
+        seq = seq[:]
+        i, j = sorted(random.sample(range(len(seq)), 2))
+        segment = seq[i:j + 1]
         random.shuffle(segment)
-        self.genome = self.genome[:i] + segment + self.genome[j + 1:]
+        return seq[:i] + segment + seq[j + 1:]
 
+#----------------------------------------------------------------------------
 
 class TSPIndividual(BaseIndividual):
-    def calculate_fitness(self, dist_matrix, optimal_given=None, bin_size=None):
-        path = self.genome
-        optimal = optimal_given if optimal_given is not None else 0
-        self.fitness = sum(dist_matrix[path[i]][path[(i + 1) % len(path)]]
-                           for i in range(len(path))) - optimal
-        self.raw_fitness = self.fitness
-
-
-class BinPackIndividual(BaseIndividual):
     def __init__(self, genome):
         super().__init__(genome)
+
+    def calculate_fitness(self, dist_matrix, optimal_given=None, bin_size=None):
+        optimal = optimal_given if optimal_given is not None else 0
+        tour1, tour2 = self.genome
+
+        def tour_length(tour):
+            return sum(dist_matrix[tour[i]][tour[(i + 1) % len(tour)]] for i in range(len(tour)))
+
+        d1 = tour_length(tour1)
+        d2 = tour_length(tour2)
+        self.raw_fitness = max(d1, d2) - optimal
+        self.fitness = self.raw_fitness
+
+    def mutate(self):
+        tour1, tour2 = self.genome
+        self.original_tour1 = tour1[:]
+        self.original_tour2 = tour2[:]
+        max_attempts = 1000
+
+        def mutate_pair(t1, t2):
+            fn = getattr(self, f"{MUTATION_TYPE}_mutate")
+            return fn(t1), fn(t2)
+
+        def are_edge_disjoint(t1, t2):
+            def edges(tour):
+                return set([(tour[i], tour[(i + 1) % len(tour)]) for i in range(len(tour))] +
+                           [(tour[(i + 1) % len(tour)], tour[i]) for i in range(len(tour))])
+            return edges(t1).isdisjoint(edges(t2))
+
+        for _ in range(max_attempts):
+            new_tour1, new_tour2 = mutate_pair(tour1[:], tour2[:])
+            if are_edge_disjoint(new_tour1, new_tour2):
+                self.genome = (new_tour1, new_tour2)
+                return
+
+        self.genome = (self.original_tour1[:], self.original_tour2[:])
+
+#----------------------------------------------------------------------------
+
+class BinPackIndividual(BaseIndividual):
+    def __init__(self, genome, bin_size=None):
+        super().__init__(genome)
+        self.bin_size = bin_size
         self.bins = [] 
 
     def calculate_fitness(self, dist_matrix=None, optimal_given=None, bin_size=None):
@@ -222,35 +255,60 @@ class BinPackIndividual(BaseIndividual):
         self.raw_fitness = self.fitness
 
 
+    def mutate(self):
+        fn = getattr(self, f"{MUTATION_TYPE}_mutate")
+        self.genome = fn(self.genome)
+
+        # Apply genome_rearrange() occasionally for diversification
+        if random.random() < 0.25:  # Tune this probability as needed
+            self.genome_rearrange()
+
+
+    def genome_rearrange(self):
+      if LAB1_REPACK:
+          # Keep top 50% bins and repack the rest using best fit
+          all_bins = [list(bin) for bin in split_bins(self.genome, self.bin_size)]
+          bin_loads = [(sum(b), idx) for idx, b in enumerate(all_bins)]
+          bin_loads.sort(reverse=True)
+
+          keep_count = len(bin_loads) *0.75
+          keep_count = int(keep_count)
+          keep_indices = set(idx for _, idx in bin_loads[:keep_count])
+          kept_bins = [all_bins[i] for i in range(len(all_bins)) if i in keep_indices]
+          repack_items = [item for i in range(len(all_bins)) if i not in keep_indices for item in all_bins[i]]
+
+          random.shuffle(repack_items)
+          for item in repack_items:
+              best_bin_index = -1
+              min_space_left = self.bin_size + 1
+              for i, bin in enumerate(kept_bins):
+                  space_left = self.bin_size - sum(bin)
+                  if space_left >= item and space_left - item < min_space_left:
+                      best_bin_index = i
+                      min_space_left = space_left - item
+              if best_bin_index == -1:
+                  kept_bins.append([item])
+              else:
+                  kept_bins[best_bin_index].append(item)
+          self.genome = [(i, w) for i, bin in enumerate(kept_bins) for w in bin]
+          return
+
+
+#----------------------------------------------------------------------------
 
 class BasePopulation:
-    def __init__(self, size, individual_cls):
+    def __init__(self, size):
         self.size = size
-        self.individual_cls = individual_cls
         self.individuals = []
         self.parents = None  # to store the parents selected by the SUS method
         self.average_fitness = []
         self.best_fitness = []
         self.std_devs = []
-        self.species_map = None
+        self.species = None
 
-    def create_individual(self, genome):
-        return self.individual_cls(genome)
 
     def evaluate_fitness(self):
         raise NotImplementedError
-
-    def fitness_ranking(self):
-        sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
-        for rank, ind in enumerate(sorted_inds):
-            ind.rank = rank + 1
-
-    def evaluate_relative_fitness(self): 
-        avg_fit = sum(ind.fitness for ind in self.individuals) / len(self.individuals)
-        relative_fitness = [ind.fitness / avg_fit for ind in self.individuals] #Computing relative fitness
-        SF = sum(relative_fitness)
-        relative_fitness_norm = [rfi / SF for rfi in relative_fitness] #normalizing the relative fitness
-        return relative_fitness_norm
 
     def select_parents(self):
         if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
@@ -271,12 +329,12 @@ class BasePopulation:
     #A function that selects a parent using Top Half Uniform
     def top_half_uniform_selection(self):
         rand = random.randint(0, len(self.individuals) // 2 - 1)
-        return rand, self.individuals[rand].genome
+        return rand, self.individuals[rand]
 
     #A function that selects a parent using RWS
     def rws_selection(self):
 
-        #Scaling the fitness values using linear scaling 
+        #Scaling the fitness values using linear scaling
         max_fitness = max(ind.fitness for ind in self.individuals)
         scaled_fitnesses = linear_scaling(self.individuals, -1, max_fitness)
 
@@ -285,8 +343,8 @@ class BasePopulation:
         selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
         if total_scaled == 0:
             random_choice = random.randint(0, len(self.individuals) - 1)
-            return random_choice, self.individuals[random_choice].genome
-        
+            return random_choice, self.individuals[random_choice]
+
         #Building the "roulete"
         cumulative_probs = []
         cumsum = 0
@@ -298,10 +356,10 @@ class BasePopulation:
         pick = random.random()
         for i, prob in enumerate(cumulative_probs):
             if pick < prob:
-                return i, self.individuals[i].genome
-        return len(self.individuals) - 1, self.individuals[-1].genome
+                return i, self.individuals[i]
+        return len(self.individuals) - 1, self.individuals[-1]
 
-    #A function that selects a list of parents using SUS 
+    #A function that selects a list of parents using SUS
     def sus_selection(self):
         if not self.parents:
             #Scaling the fitness values using linear scaling
@@ -312,7 +370,7 @@ class BasePopulation:
             total_fitness = sum(scaled_fitness)
             if total_fitness == 0:
                 random_choice = random.randint(0, len(self.individuals) - 1)
-                return random_choice, self.individuals[random_choice].genome
+                return random_choice, self.individuals[random_choice]
             selection_probs = [fit / total_fitness for fit in scaled_fitness]
 
             #Building the "roulete"
@@ -327,28 +385,33 @@ class BasePopulation:
             self.parents = []
             for j, prob in enumerate(cumulative_probs):
                 if target < prob:
-                    self.parents.append((j, self.individuals[j].genome))
+                    self.parents.append((j, self.individuals[j]))
                     break
         i1, p1 = self.parents[0]
         self.parents = self.parents[1:]
         return i1, p1
 
-    #A function that selects a parent using Deterministic Tournament Selection 
+    #A function that selects a parent using Deterministic Tournament Selection
     def tournament_selection_deter(self):
         k = min(TOURNAMENT_K, len(self.individuals))
-        tournament = random.sample(range(len(self.individuals)), k) #choosing K random indices 
+        tournament = random.sample(range(len(self.individuals)), k) #choosing K random indices
         tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
-        return tournament[0], self.individuals[tournament[0]].genome
+        return tournament[0], self.individuals[tournament[0]]
 
-    #A function that selects a parent using Stochastic Tournament Selection 
+    #A function that selects a parent using Stochastic Tournament Selection
     def tournament_selection_stoch(self):
         k = min(TOURNAMENT_K, len(self.individuals))
         tournament = random.sample(range(len(self.individuals)), k) #choosing K random indices
         tournament.sort(key=lambda ind: self.individuals[ind].rank) #sorting the corresponding individuals
         for i in range(TOURNAMENT_K):
             if random.random() < TOURNAMENT_P:
-                return tournament[i], self.individuals[tournament[i]].genome
-        return tournament[-1], self.individuals[tournament[-1]].genome
+                return tournament[i], self.individuals[tournament[i]]
+        return tournament[-1], self.individuals[tournament[-1]]
+
+    def fitness_ranking(self):
+        sorted_inds = sorted(self.individuals, key=lambda ind: ind.fitness)
+        for rank, ind in enumerate(sorted_inds):
+            ind.rank = rank + 1
 
     def crossover(self, p1, p2):
         if CROSSOVER_TYPE == "PMX":
@@ -359,8 +422,23 @@ class BasePopulation:
             return self.cx_crossover(p1, p2)
         elif CROSSOVER_TYPE == "ER":
             return self.er_crossover(p1, p2)
+        else:
+            raise ValueError(f"Wrong crossover type: {CROSSOVER_TYPE}")
+
+    def pmx_crossover(self, p1, p2):
+        cut = random.randint(1, len(p1) - 1)
+        child = p1[:cut] + [gene for gene in p2 if gene not in p1[:cut]]
+        return child
 
     def order_crossover(self, p1, p2):
+      if(PROBLEM == "BIN_PACK"):
+        size = len(p1)
+        a, b = sorted(random.sample(range(size), 2))
+        middle = p1[a:b]
+        remaining = [item for item in p2 if item not in middle]
+        return remaining[:a] + middle + remaining[a:]
+
+      elif(PROBLEM == "TSP"):
         size = len(p1)
         indices_to_copy = random.sample(range(size), size // 2)
         child = [p1[i] if i in indices_to_copy else None for i in range(size)]
@@ -373,7 +451,8 @@ class BasePopulation:
                 child[i] = p2[pos]
                 remaining_items.remove(p2[pos])
                 pos += 1
-        return self.create_individual(child)
+        return child
+
 
     def pmx_crossover(self, p1, p2):
         size = len(p1)
@@ -386,7 +465,8 @@ class BasePopulation:
                     index = p1.index(gene)
                     gene = p2[index]
                 child[i] = gene
-        return self.create_individual(child)
+        return (child)
+
 
     def cx_crossover(self, p1, p2):
         size = len(p1)
@@ -406,7 +486,7 @@ class BasePopulation:
                 if idx == start:
                     break
             cycle += 1
-        return self.create_individual(child)
+        return (child)
 
     def er_crossover(self, p1, p2):
         size = len(p1)
@@ -439,44 +519,88 @@ class BasePopulation:
             child.append(next_city)
             used.add(next_city)
             current = next_city
-        return self.create_individual(child)
+        return (child)
+
+
+    def apply_fitness_sharing(self):
+        if not NICHE_METHOD_USE:
+            return
+
+        sigma = NICHE_SIGMA
+        alpha = NICHE_ALPHA
+
+        TOP_K = 40
+        if len(self.individuals) <= TOP_K:
+            subset = self.individuals
+        else:
+            subset = sorted(self.individuals, key=lambda ind: ind.fitness)[:TOP_K]
+
+        distance_matrix = np.zeros((len(subset), len(subset)))
+
+        for i in range(len(subset)):
+            for j in range(i + 1, len(subset)):
+                if PROBLEM == "TSP":
+                    dist = distance_between_genomes_TSP(subset[i], subset[j])
+                elif PROBLEM == "BIN_PACK":
+                    dist = distance_between_genomes_BinPack(subset[i], subset[j], self.bin_max)
+                distance_matrix[i][j] = dist
+                distance_matrix[j][i] = dist
+
+        for i in range(len(subset)):
+            sharing_sum = 0
+            for j in range(len(subset)):
+                dist = distance_matrix[i][j]
+                if dist < sigma:
+                    sharing_sum += 1 - (dist / sigma) ** alpha
+            sharing_sum = max(sharing_sum, 1e-6)
+            subset[i].fitness = subset[i].raw_fitness * (1 / sharing_sum)
+
+
+    def apply_threshold_speciation(self):
+
+        global SPECIES_THRESHOLD
+
+        self.species = {}
+        for ind in self.individuals:
+            placed = False
+            for s in self.species:
+                if distance_between_genomes_TSP(ind, self.species[s][0]) < SPECIES_THRESHOLD:
+                    self.species[s].append(ind)
+                    placed = True
+                    break
+            if not placed:
+                self.species[len(self.species)] = [ind]
+            
+            ind.specie = len(self.species) - 1
+
+        current_count = sum(len(s) for s in self.species.values())
+
+        # Auto-adjust threshold to move toward the target count
+        if current_count < SPECIES_TARGET_COUNT:
+            SPECIES_THRESHOLD += THRESHOLD_ADJUST_RATE * SPECIES_THRESHOLD
+        elif current_count > SPECIES_TARGET_COUNT:
+            SPECIES_THRESHOLD -= THRESHOLD_ADJUST_RATE * SPECIES_THRESHOLD
+        SPECIES_THRESHOLD = max(SPECIES_THRESHOLD, 0.01)
+
 
     def generation_stats(self):
         fitnesses = [ind.fitness for ind in self.individuals]
         self.average_fitness.append(sum(fitnesses) / len(fitnesses))
         self.best_fitness.append(min(fitnesses))
         variance = sum((f - self.average_fitness[-1]) ** 2 for f in fitnesses) / len(fitnesses)
-        std_dev = math.sqrt(variance) 
+        std_dev = math.sqrt(variance)
         self.std_devs.append(std_dev)
-    
-    #A function for controlling the population-based mutation rate (section 2a)
-    def mutaiton_control(self):
-        if POP_MUTATION_CONTROL_METHOD == "NON-LINEAR": #Non-linear method
-            self.non_linear_mutation_policy()
-        elif POP_MUTATION_CONTROL_METHOD == "TRIG-HYPER": #Triggered hypermutation method
-            self.trigger_hyper_mutation_policy()
 
-    #A function that computes the population based mutation rate using the nonlinear policy (section 2a)
     def non_linear_mutation_policy(self):
         global GA_MUTATIONRATE
-
-        #Defining the parameters
-        min_mutation_rate=0.05
-        p_max=0.5
-        r=0.01
+        min_mutation_rate = 0.05
+        p_max = 0.5
+        r = 0.01
         generation = len(self.average_fitness)
-
-        #Computing the mutation rate
         exp_term = math.exp(-r * generation)
-        numerator = 2 * (p_max * exp_term)
-        denominator = 1 + exp_term
-        f_t = numerator / denominator
+        f_t = (2 * p_max * exp_term) / (1 + exp_term)
+        GA_MUTATIONRATE = max(f_t, min_mutation_rate)
 
-        #Adjusting mutate rate 
-        GA_MUTATIONRATE = max(f_t , min_mutation_rate)
-        print(f"Mutation rate: {GA_MUTATIONRATE:.2f}")
-    
-    #A function that computes the population based mutation and uses the hypermutation policy (section 2a)
     def trigger_hyper_mutation_policy(self):
         global GA_MUTATIONRATE, TRIG_HYPER_TRIGGER, HIGH_MUTATION_START_VAL
         high_mutation = 0.5 
@@ -510,15 +634,14 @@ class BasePopulation:
             elif len(self.std_devs) > k and self.std_devs[-1] - self.std_devs[-k] < epsilon:
                 GA_MUTATIONRATE = high_mutation
 
-    #A function that mutates the individuals based on their fitness (section 2b)
     def fit_based_ind_mutation(self):
-        relative_fitness = self.evaluate_relative_fitness()
-        for ind, rf in zip(self.individuals, relative_fitness):
-            mut_rate = max(0.05, GA_MUTATIONRATE * (1 - rf))
+        avg_fit = sum(ind.fitness for ind in self.individuals) / len(self.individuals)
+        for ind in self.individuals:
+            rel_fit = ind.fitness / avg_fit if avg_fit > 0 else 1
+            mut_rate = max(0.05, GA_MUTATIONRATE * (1 - rel_fit))
             if random.random() < mut_rate:
                 ind.mutate()
-    
-    #A function that mutates the individuals based on their age (section 2b)
+
     def age_based_ind_mutation(self):
         p_min = 0.05
         alpha = 0.05
@@ -527,63 +650,74 @@ class BasePopulation:
             if random.random() < mutation_rate:
                 ind.mutate()
 
-    def assign_species(self, threshold):
-        species = []
-        species_map = {}
-        for ind in self.individuals:
-            assigned = False
-            for sid, representative in enumerate(species):
-                sim = self.similarity(ind, representative)
-                if sim >= threshold:  # similarity, not distance
-                    ind.species_id = sid
-                    species_map[tuple(ind.genome)] = sid
-                    assigned = True
-                    break
-            if not assigned:
-                new_id = len(species)
-                ind.species_id = new_id
-                species.append(ind)
-                species_map[tuple(ind.genome)] = new_id
-
-        self.species_map = species_map
-        print(f"Species count: {len(species)}")
-        return len(species)
-    
-    def species_adjustment(self, species_count):
-        global SPECIES_THRESHOLD
-        if species_count > SPECIES_TARGET_COUNT:
-            SPECIES_THRESHOLD += THRESHOLD_ADJUST_RATE
-        elif species_count < SPECIES_TARGET_COUNT:
-            SPECIES_THRESHOLD = max(0.01, SPECIES_THRESHOLD - THRESHOLD_ADJUST_RATE)
-
-
+#----------------------------------------------------------------------------
 
 class TSPPopulation(BasePopulation):
     def __init__(self, coords, size, optimal_distance=None):
-        super().__init__(size, TSPIndividual)
+        super().__init__(size)
         self.dist_matrix = compute_distance_matrix(coords)
         self.individuals = self.init_population(coords)
+        self.raw_fitness = None  # ADD THIS LINE
         self.optimal = optimal_distance
 
     def init_population(self, items):
-        base = list(range(len(items)))
-        return [TSPIndividual(random.sample(base, len(base))) for _ in range(self.size)]
+      base = list(range(len(items)))
+      population = []
+
+      for _ in range(self.size):
+          tour1 = random.sample(base, len(base))
+
+          # Build edge set from tour1 (both directions)
+          edges1 = set()
+          for i in range(len(tour1)):
+              a = tour1[i]
+              b = tour1[(i + 1) % len(tour1)]
+              edges1.add((a, b))
+              edges1.add((b, a))
+
+          # Try to generate tour2 disjoint in edges
+          max_attempts = 400
+          for _ in range(max_attempts):
+              tour2 = random.sample(base, len(base))
+              valid = True
+              for i in range(len(tour2)):
+                  a = tour2[i]
+                  b = tour2[(i + 1) % len(tour2)]
+                  if (a, b) in edges1 or (b, a) in edges1:
+                      valid = False
+                      break
+              if valid:
+                  break
+          else:
+              tour2 = random.sample(base, len(base))
+
+          population.append(TSPIndividual((tour1, tour2)))
+
+      return population
+
 
     def evaluate_fitness(self):
-
         for ind in self.individuals:
             ind.calculate_fitness(self.dist_matrix, self.optimal)
+
+        if FITNESS_COMPUTATION_MODE == "AGE":
+            for ind in self.individuals:
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
 
         if FITNESS_COMPUTATION_MODE == "NOVELITY":
             #find for each individual the edges 
             edges = []
             for ind in self.individuals:
                 route_edges = set()
-                for j in range(len(ind.genome)):
-                    a = ind.genome[j]
-                    b = ind.genome[(j + 1) % len(ind.genome)]
-                    route_edges.add((a, b))
-                    route_edges.add((b, a))
+                for j in range(len(ind.genome[0])):
+                    a1 = ind.genome[0][j]
+                    b1 = ind.genome[1][(j + 1) % len(ind.genome)]
+                    route_edges.add((a1, b1))
+                    route_edges.add((b1, a1))
+                    a2 = ind.genome[1][j]
+                    b2 = ind.genome[0][(j + 1) % len(ind.genome)]
+                    route_edges.add((a2, b2))
+                    route_edges.add((b2, a2))
                 edges.append(route_edges)
             #find the k nearest neighbors based on the number of intersection in edges 
             for j, ind in enumerate(self.individuals):
@@ -599,118 +733,195 @@ class TSPPopulation(BasePopulation):
                 novelty_score = - sum([x[1] for x in k_neighbors]) / NOVELITY_K
                 ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * novelty_score
 
-        elif FITNESS_COMPUTATION_MODE == "AGE":
-            for ind in self.individuals:
-                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
+    def build_disjoint_tour(self, tour1, max_attempts=90000):
+        n = len(tour1)
+        used_edges = set((min(tour1[i], tour1[(i + 1) % n]), max(tour1[i], tour1[(i + 1) % n])) for i in range(n))
+
+        for _ in range(max_attempts):
+            remaining = set(tour1)
+            current = random.choice(list(remaining))
+            tour2 = [current]
+            remaining.remove(current)
+            edges2 = set()
+
+            valid = True
+            while remaining:
+                candidates = [city for city in remaining if (min(current, city), max(current, city)) not in used_edges and (min(current, city), max(current, city)) not in edges2]
+                if not candidates:
+                    valid = False
+                    break
+                next_city = min(candidates, key=lambda city: self.dist_matrix[current][city])
+                edges2.add((min(current, next_city), max(current, next_city)))
+                tour2.append(next_city)
+                remaining.remove(next_city)
+                current = next_city
+
+            # Final edge back to start
+            if valid:
+                final_edge = (min(tour2[-1], tour2[0]), max(tour2[-1], tour2[0]))
+                if final_edge in used_edges or final_edge in edges2:
+                    continue
+                tour2.append(tour2[0])  # temporarily close cycle to validate
+                return tour2[:-1]  # strip redundant end node
+
+        raise RuntimeError("Failed to build fully edge-disjoint tour2.")
+
+
+
+    def two_opt(self, tour):
+        improved = True
+        while improved:
+            improved = False
+            for i in range(1, len(tour) - 2):
+                for j in range(i + 1, len(tour)):
+                    if j - i == 1:
+                        continue
+                    before = self.dist_matrix[tour[i - 1]][tour[i]] + self.dist_matrix[tour[j]][tour[(j + 1) % len(tour)]]
+                    after = self.dist_matrix[tour[i - 1]][tour[j]] + self.dist_matrix[tour[i]][tour[(j + 1) % len(tour)]]
+                    if before > after:
+                        tour[i:j + 1] = reversed(tour[i:j + 1])
+                        improved = True
+        return tour
+
 
     def mate(self):
-
         self.evaluate_fitness()
 
-        if SPECIES_THRESHOLD_USE:
-            species_count = self.assign_species(SPECIES_THRESHOLD)
-            self.species_adjustment(species_count)
+        # Apply population-based mutation control
+        self.generation_stats()
+        if POP_MUTATION_CONTROL_METHOD == "NON-LINEAR":
+            self.non_linear_mutation_policy()
+        elif POP_MUTATION_CONTROL_METHOD == "TRIG-HYPER":
+            self.trigger_hyper_mutation_policy()
 
         if NICHE_METHOD_USE:
             self.apply_fitness_sharing()
-        
 
-        #Evaluating the population stats and adjusting the mutation rate
-        self.generation_stats()
-        self.mutaiton_control()
+        if ENABLE_THRESHOLD_SPECIATION:
+            self.apply_threshold_speciation()
 
-        new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
-        
-        #Increasing the age of the individuals
+        # Optional: monitor population diversity
+        if self.size >= 2:
+            dist = distance_between_genomes_TSP(self.individuals[0], self.individuals[1])
+
+        # Elitism based on raw or shared fitness
+        elite_count = max(1, int(GA_ELITRATE * self.size))
+        if NICHE_METHOD_USE:
+            new_pop = sorted(self.individuals, key=lambda x: x.raw_fitness)[:elite_count]
+        else:
+            new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:elite_count]
+
         for ind in new_pop:
-            ind.age += 1
+          ind.age += 1
 
         while len(new_pop) < self.size:
-            _, p1 = self.select_parents()
-            if SPECIES_THRESHOLD_USE:
+            _, parent1 = self.select_parents()
+            if ENABLE_THRESHOLD_SPECIATION:
                 real_individuals = self.individuals[:]
-                self.individuals = [ind for ind in self.individuals if ind.species_id == self.species_map[tuple(p1)]]
-                _, p2 = self.select_parents()
+                self.individuals = self.species[parent1.specie]
+                _, parent2 = self.select_parents()
                 self.individuals = real_individuals
             else:
-                _, p2 = self.select_parents()
-            child = self.crossover(p1, p2)
+                _, parent2 = self.select_parents()
+
+            t1a = parent1.genome[0]
+            t1b = parent2.genome[0]
+
+            # Perform crossover once for child_tour1
+            child_tour1 = self.crossover(t1a, t1b)
+
+            # Always generate a guaranteed disjoint second tour
+            child_tour2 = self.build_disjoint_tour(child_tour1)
+
+            child = TSPIndividual((child_tour1, child_tour2))
+
+            if random.random() < GA_MUTATIONRATE:
+                child.mutate()
+                # Rebuild tour2 again after mutation to preserve edge-disjointness
+                t1, _ = child.genome
+                t2 = self.build_disjoint_tour(t1)
+                child.genome = (t1, t2)
+                # Apply 2-opt local optimization to high-quality children (e.g., elite portion)
+            if len(new_pop) < elite_count * 2:  # Only apply to top ~10% of next gen
+                t1, t2 = child.genome
+                t1 = self.two_opt(t1)
+                t2 = self.two_opt(t2)
+                child.genome = (t1, t2)
+
+            # Final safety: recheck and rebuild if somehow disjointness broke
+            t1, t2 = child.genome
+            edges1 = set((t1[i], t1[(i + 1) % len(t1)]) for i in range(len(t1)))
+            edges2 = set((t2[i], t2[(i + 1) % len(t2)]) for i in range(len(t2)))
+            if not edges1.isdisjoint(edges2):
+                # Repair it one last time
+                t2 = self.build_disjoint_tour(t1)
+                child.genome = (t1, t2)
 
             child.calculate_fitness(self.dist_matrix, self.optimal)
             new_pop.append(child)
 
         self.individuals = new_pop
-
-        #Mutation
-        if IND_MUTATION_CONTROL_METHOD == "FIT": #Fitness-based method
+        # Apply individual-based mutation control
+        if IND_MUTATION_CONTROL_METHOD == "FIT":
             self.fit_based_ind_mutation()
-        elif IND_MUTATION_CONTROL_METHOD == "AGE": #Age-based method
+        elif IND_MUTATION_CONTROL_METHOD == "AGE":
             self.age_based_ind_mutation()
-    
+        else:
+            for ind in self.individuals:
+                if random.random() < GA_MUTATIONRATE:
+                    ind.mutate()
+
     def best_individual(self):
-        routes = [(ind.genome, ind.fitness, ind.raw_fitness) for ind in self.individuals]
+        routes = [(max(ind.genome[0], ind.genome[1]), ind.fitness, ind.raw_fitness) for ind in self.individuals]
         routes.sort(key=lambda x: x[1])
-        edges_to_check_wtih = []
-        print(f"Best fitness is {routes[0][1]}")
-        for i in range(len(routes)):
-            route_edges = set()
-            for j in range(len(routes[i][0])):
-                a = routes[i][0][j]
-                b = routes[i][0][(j + 1) % len(routes[i][0])]
-                route_edges.add((a, b))
-                route_edges.add((b, a))
-            if any(route_edges.isdisjoint(edges) for edges in edges_to_check_wtih):
-                print(f"Best index is {i}")
-                return routes[i][0], routes[i][1], routes[i][2]
-            else:
-                edges_to_check_wtih.append(route_edges)
+        return routes[0][0], routes[0][1], routes[0][2]
 
-    def similarity(self, ind1, ind2):
-        edges1 = set((min(ind1.genome[i], ind1.genome[(i + 1) % len(ind1.genome)]), max(ind1.genome[i], ind1.genome[(i + 1) % len(ind1.genome)]))
-                    for i in range(len(ind1.genome)))
-        edges2 = set((min(ind2.genome[i], ind2.genome[(i + 1) % len(ind2.genome)]), max(ind2.genome[i], ind2.genome[(i + 1) % len(ind2.genome)]))
-                    for i in range(len(ind2.genome)))
-        shared = len(edges1.intersection(edges2))
-        total = len(edges1.union(edges2))
-        return shared / total if total > 0 else 0.0
-    
-    def apply_fitness_sharing(self):
-        for i, ind_i in enumerate(self.individuals):
-            sharing_sum = 0
-            for j, ind_j in enumerate(self.individuals):
-                if i == j:
-                    continue
+#----------------------------------------------------------------------------
 
-                # Number of shared edges (unnormalized)
-                similarity_rate = self.similarity(ind_i, ind_j)
-                # Normalize by total number of edges
-                similarity_rate /= len(ind_i.genome)
-
-                distance = 1 - similarity_rate  # distance in [0, 1]
-                if distance < NICHE_SIGMA:
-                    sharing_sum += 1 - (distance / NICHE_SIGMA) ** NICHE_ALPHA
-
-            sharing_sum = max(sharing_sum, 1e-6)  # prevent divide by 0
-            ind_i.fitness = ind_i.fitness / sharing_sum
-
-
-    
 class BinPackPopulation(BasePopulation):
     def __init__(self, items, size, optimal, bin_max):
-        super().__init__(size, BinPackIndividual)
+        super().__init__(size)
         self.items = [(index, weight) for index, weight in enumerate(items)]
-        self.individuals = self.init_population()
         self.optimal = optimal
         self.bin_max = bin_max
+        self.individuals = self.init_population()
+
 
     def init_population(self):
-        return [BinPackIndividual(random.sample(self.items, len(self.items))) for _ in range(self.size)]
+        x = int(0.5 * self.size)  # best fit count
+        y = int(0.3 * self.size)  # random fit count
+        z = self.size - x - y     # first fit count
+
+        population = []
+
+        # Best Fit
+        for _ in range(x):
+            genome = best_fit(self.items, self.bin_max)
+            population.append(BinPackIndividual(genome, self.bin_max))
+
+        # Random Fit
+        for _ in range(y):
+            genome = [(i, w) for i, w in self.items]
+            random.shuffle(genome)
+            population.append(BinPackIndividual(genome, self.bin_max))
+
+        # First Fit
+        for _ in range(z):
+            genome = first_fit(self.items, self.bin_max)
+            population.append(BinPackIndividual(genome, self.bin_max))
+
+        return population
+
 
     def evaluate_fitness(self):
         for ind in self.individuals:
             ind.calculate_fitness(None, self.optimal, self.bin_max)
 
-        if FITNESS_COMPUTATION_MODE == "NOVELITY":
+        if FITNESS_COMPUTATION_MODE == "AGE":
+            for ind in self.individuals:
+                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
+
+        elif FITNESS_COMPUTATION_MODE == "NOVELITY":
             #find for each individual the bins 
             population_bins = []
             for ind in self.individuals:
@@ -741,92 +952,92 @@ class BinPackPopulation(BasePopulation):
                 novelty_score = - sum([x[1] for x in k_neighbors]) / NOVELITY_K
                 ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * novelty_score
 
-        elif FITNESS_COMPUTATION_MODE == "AGE":
-            for ind in self.individuals:
-                ind.fitness = WEIGHT_FACTOR * ind.fitness + (1 - WEIGHT_FACTOR) * ind.age
+    def shuffle_worst_individuals(self, percent=0.2):
+        count = int(percent * len(self.individuals))
+        worst = sorted(self.individuals, key=lambda x: x.fitness, reverse=True)[:count]
+        for ind in worst:
+            genome = ind.genome
+            random.shuffle(genome)
+            ind.genome = genome
+
+
 
     def mate(self):
+
         self.evaluate_fitness()
+        self.shuffle_worst_individuals(percent=0.2)
 
-        if SPECIES_THRESHOLD_USE:
-            species_count = self.assign_species(SPECIES_THRESHOLD)
-            self.species_adjustment(species_count)
+        # Apply population-based mutation control
+        self.generation_stats()
+        if POP_MUTATION_CONTROL_METHOD == "NON-LINEAR":
+            self.non_linear_mutation_policy()
+        elif POP_MUTATION_CONTROL_METHOD == "TRIG-HYPER":
+            self.trigger_hyper_mutation_policy()
 
+        # Optional: apply fitness sharing
         if NICHE_METHOD_USE:
             self.apply_fitness_sharing()
 
-        #Evaluating the population stats and adjusting the mutation rate
-        self.generation_stats()
-        self.mutaiton_control()
+        if ENABLE_THRESHOLD_SPECIATION:
+            self.apply_threshold_speciation()
 
-        new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:int(GA_ELITRATE * self.size)]
+        # Optional: monitor population diversity
+        if self.size >= 2:
+            dist = distance_between_genomes_BinPack(self.individuals[0], self.individuals[1], self.bin_max)
+
+        # Elitism based on raw or shared fitness
+        elite_count = max(1, int(GA_ELITRATE * self.size))
+        if NICHE_METHOD_USE:
+            new_pop = sorted(self.individuals, key=lambda x: x.raw_fitness)[:elite_count]
+        else:
+            new_pop = sorted(self.individuals, key=lambda x: x.fitness)[:elite_count]
+
+        for ind in new_pop:
+          ind.age += 1
+
         while len(new_pop) < self.size:
-            _, p1 = self.select_parents()
-            if SPECIES_THRESHOLD_USE:
+            _, parent1 = self.select_parents()
+            if ENABLE_THRESHOLD_SPECIATION:
                 real_individuals = self.individuals[:]
-                self.individuals = [ind for ind in self.individuals if ind.species_id == self.species_map[tuple(p1)]]
-                _, p2 = self.select_parents()
+                self.individuals = self.species[parent1.specie]
+                _, parent2 = self.select_parents()
                 self.individuals = real_individuals
             else:
-                _, p2 = self.select_parents()
-            child = self.crossover(p1, p2)
+                _, parent2 = self.select_parents()
+
+            parent1 = parent1.genome
+            parent2 = parent2.genome
+
+            child_genome = self.crossover(parent1, parent2)
+            child = BinPackIndividual(child_genome, self.bin_max)
+
+
+            if random.random() < GA_MUTATIONRATE:
+                child.mutate()
+                child.calculate_fitness(None, self.optimal, self.bin_max)
+
 
             child.calculate_fitness(None, self.optimal, self.bin_max)
             new_pop.append(child)
-            
-        self.individuals = new_pop
 
-        #Mutation
-        if IND_MUTATION_CONTROL_METHOD == "FIT": #Fitness-based method
+        self.individuals = new_pop
+        # Apply individual-based mutation control
+        if IND_MUTATION_CONTROL_METHOD == "FIT":
             self.fit_based_ind_mutation()
-        elif IND_MUTATION_CONTROL_METHOD == "AGE": #Age-based method
+        elif IND_MUTATION_CONTROL_METHOD == "AGE":
             self.age_based_ind_mutation()
+        else:
+            for ind in self.individuals:
+              if random.random() < GA_MUTATIONRATE:
+                  ind.mutate()
+                  ind.calculate_fitness(None, self.optimal, self.bin_max)
+
 
     def best_individual(self):
         best = min(self.individuals, key=lambda ind: ind.fitness)
         return best.bins, best.fitness, best.raw_fitness
-    
 
-    def similarity(self, ind1, ind2):
-        bins1 = ind1.bins[:]
-        bins2 = ind2.bins[:]
-
-        size = max(len(bins1), len(bins2))
-        while len(bins1) < size:
-            bins1.append([])
-        while len(bins2) < size:
-            bins2.append([])
-
-        cost_matrix = np.zeros((size, size))
-        for i in range(size):
-            for j in range(size):
-                set1 = set(bins1[i])
-                set2 = set(bins2[j])
-                cost_matrix[i][j] = len(set1.symmetric_difference(set2))
-
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        total_diff = cost_matrix[row_ind, col_ind].sum()
-        total_items = sum(len(b) for b in bins1 + bins2)
-
-        return 1.0 - (total_diff / total_items) if total_items > 0 else 0.0 
-    
-    def apply_fitness_sharing(self):
-        for i, ind_i in enumerate(self.individuals):
-            sharing_sum = 0
-            for j, ind_j in enumerate(self.individuals):
-                if i == j:
-                    continue
-
-                similarity_rate = self.similarity(ind_i, ind_j)
-
-                distance = 1 - similarity_rate  # distance in [0, 1]
-                if distance < NICHE_SIGMA:
-                    sharing_sum += 1 - (distance / NICHE_SIGMA) ** NICHE_ALPHA
-
-            sharing_sum = max(sharing_sum, 1e-6)  # prevent divide by 0
-            ind_i.fitness = ind_i.fitness / sharing_sum
-
-
+#----------------------------------------------------------------------------
 
 def euclidean_distance(a, b):
     return round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
@@ -840,12 +1051,102 @@ def compute_distance_matrix(coords):
                 matrix[i][j] = euclidean_distance(coords[i], coords[j])
     return matrix
 
+def distance_between_genomes_TSP(ind1, ind2):
+    def get_edges(tour):
+        return set((min(tour[i], tour[(i + 1) % len(tour)]),
+                    max(tour[i], tour[(i + 1) % len(tour)])) for i in range(len(tour)))
 
-#A function that linearly scales the fitness values 
+    edges1 = get_edges(ind1.genome[0]).union(get_edges(ind1.genome[1]))
+    edges2 = get_edges(ind2.genome[0]).union(get_edges(ind2.genome[1]))
+
+    shared_edges = len(edges1.intersection(edges2))
+    total_edges = len(edges1.union(edges2))
+    return 1 - shared_edges / total_edges 
+
+
+def distance_between_genomes_BinPack(ind1, ind2, bin_capacity):
+    bins1 = split_bins(ind1.genome, bin_capacity)
+    bins2 = split_bins(ind2.genome, bin_capacity)
+
+    size = max(len(bins1), len(bins2))
+    while len(bins1) < size:
+        bins1.append([])
+    while len(bins2) < size:
+        bins2.append([])
+
+    cost_matrix = np.zeros((size, size))
+    for i in range(size):
+        for j in range(size):
+            set1 = set(bins1[i])
+            set2 = set(bins2[j])
+            cost_matrix[i][j] = len(set1.symmetric_difference(set2))
+
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    total_diff = cost_matrix[row_ind, col_ind].sum()
+    total_items = sum(len(b) for b in bins1)
+
+    return total_diff / total_items if total_items > 0 else 0
+
+def split_bins(flat_genome, bin_capacity):
+    bins = []
+    current_bin = []
+    current_sum = 0
+    for index, weight in flat_genome:  # <-- correct unpacking
+        if current_sum + weight > bin_capacity:
+            bins.append([weight for _, weight in current_bin])
+            current_bin = []
+            current_sum = 0
+        current_bin.append((index, weight))
+        current_sum += weight
+    if current_bin:
+        bins.append([weight for _, weight in current_bin])
+    return bins
+
+
+
+#A function that linearly scales the fitness values
 def linear_scaling(individuals, a,b):
     scaled_fitness = [a * ind.fitness + b for ind in individuals]
     return scaled_fitness
-# -------- Main Runner --------
+
+def first_fit(items, bin_capacity):
+    shuffled = items[:]
+    random.shuffle(shuffled)
+    bins = []
+
+    for item in shuffled:
+        placed = False
+        for bin in bins:
+            if sum(w for _, w in bin) + item[1] <= bin_capacity:
+                bin.append(item)
+                placed = True
+                break
+        if not placed:
+            bins.append([item])
+
+    flat = [item for bin in bins for item in bin]
+    return flat
+
+def best_fit(items, bin_capacity):
+    shuffled = items[:]
+    random.shuffle(shuffled)
+    bins = []
+
+    for item in shuffled:
+        best_bin_index = -1
+        min_space_left = bin_capacity + 1
+        for i, bin in enumerate(bins):
+            space_left = bin_capacity - sum(w for _, w in bin)
+            if space_left >= item[1] and space_left - item[1] < min_space_left:
+                best_bin_index = i
+                min_space_left = space_left - item[1]
+        if best_bin_index == -1:
+            bins.append([item])
+        else:
+            bins[best_bin_index].append(item)
+
+    flat = [item for bin in bins for item in bin]
+    return flat
 
 def main(filepath):
 
@@ -897,14 +1198,44 @@ def main(filepath):
         #Printing the best genome and its fitness achieved in the current generation
         best_genome = best[0] if best else None
         best_fitness = round(best[1], 2) if best else None 
-        print(f"Gen {gen:3}. Best = {best_genome} ({best_fitness})")
+        best_raw_fitness = round(best[2], 2) if best else None 
+        print(f"Gen {gen:3}. Best = {best_genome}, (Fitness:{best_fitness}), (Raw Fitness:{best_raw_fitness})")
         print("")
 
     #printing the best results achieved throughout the generations
     print("\nBest tour:")
     print(best_gen_so_far)
-    print(f"Best Fitness Achieved: {best_fit_so_far:.2f}")
-    print(f"Best Distance Achieved: {best_raw_fitness_so_far + optimal:.2f}")
+    print(f"Best Fitness Achieved: Adaptive: {best_fit_so_far:.2f}, Raw: {best_raw_fitness_so_far:.2f}")
+    if PROBLEM == "TSP":
+        print(f"Best Distance Achieved: {best_raw_fitness_so_far + optimal:.2f}")
+    else:
+        print(f"Best Number of Bins Achieved: {best_raw_fitness_so_far + optimal:.2f}")
+
+    if PROBLEM == "TSP":
+        import matplotlib.pyplot as plt
+
+        coords = items  # the list of (x, y) tuples
+
+        if isinstance(best_gen_so_far, tuple):
+            first_path = best_gen_so_far[0]
+        else:
+            first_path = best_gen_so_far 
+
+        x = [coords[i][0] for i in first_path] + [coords[first_path[0]][0]]
+        y = [coords[i][1] for i in first_path] + [coords[first_path[0]][1]]
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(x, y, 'ro-', label="Path 1")
+        for i, (xi, yi) in enumerate(coords):
+            plt.text(xi, yi, str(i), fontsize=9)
+        plt.title("TSP Tour")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+
 
 if __name__ == "__main__":
 
