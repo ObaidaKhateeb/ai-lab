@@ -194,7 +194,6 @@ class ILSAlgorithm:
         best_fitness_found = float('inf')
         while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
             CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
-            print(CURRENT_TEMPERATURE)
             for individual in self.population.individuals:
                 # local search
                 neighbor = self.find_neighbor(individual)
@@ -220,7 +219,7 @@ class ILSAlgorithm:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-            #best_individual_iteration(self.population, iter_count)
+            iteration_statistics(self.population, iter_count)
             iter_count += 1
             
         elapsed_end_time = time.time()
@@ -228,6 +227,7 @@ class ILSAlgorithm:
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
         plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
 
+    #A function that finds a random neighbor of an individual
     def find_neighbor(self, individual):
         neighborhood_methods = ["2-opt", "relocate", "reposition", "swap", "shuffle"]
         method = random.choice(neighborhood_methods)
@@ -298,64 +298,16 @@ class ILSAlgorithm:
             new_individual.evaluate()
             return new_individual
 
+    #A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
     def simulated_annealing(self, individual_fitness, neighbor_fitness):
         delta = neighbor_fitness - individual_fitness
         probability = math.exp(-delta / CURRENT_TEMPERATURE)
-        print(probability)
         if random.random() < probability:
             return True
         return False
 
-    def tabu_search(self, solution, iterations=1000, tabu_tenure=20):
-        from collections import deque
-        best = tuple(tuple(r) for r in solution)
-        best_cost = self.route_length(solution)
-        tabu = deque(maxlen=tabu_tenure)
-
-        for _ in range(iterations):
-            neighbor = self.swap_customers([list(r) for r in solution])
-            key = tuple(tuple(r) for r in neighbor)
-            cost = self.route_length(neighbor)
-            if key not in tabu and cost < best_cost:
-                best = key
-                best_cost = cost
-            tabu.append(key)
-        return [list(r) for r in best], best_cost
-
-    def iterative_local_search(self, solution, iterations=1000):
-        best = [r[:] for r in solution]
-        best_cost = self.route_length(best)
-
-        for _ in range(iterations):
-            local = self.local_search(best)
-            cost_local = self.route_length(local)
-            if cost_local < best_cost:
-                best = local
-                best_cost = cost_local
-            perturbed = self.swap_customers(local)
-            cost_perturbed = self.route_length(perturbed)
-            if cost_perturbed < best_cost:
-                best = perturbed
-                best_cost = cost_perturbed
-        return best, best_cost
-
-    def swap_customers(self, solution):
-        new = [r[:] for r in solution]
-        r1, r2 = random.sample(range(len(new)), 2)
-        if len(new[r1]) > 2 and len(new[r2]) > 2:
-            i = random.randint(1, len(new[r1]) - 2)
-            j = random.randint(1, len(new[r2]) - 2)
-            new[r1][i], new[r2][j] = new[r2][j], new[r1][i]
-        return new
-
-    def local_search(self, solution):
-        new = [r[:] for r in solution]
-        for route in new:
-            if len(route) > 4:
-                i = random.randint(1, len(route) - 3)
-                j = random.randint(i + 1, len(route) - 2)
-                route[i:j+1] = reversed(route[i:j+1])
-        return new
+    def tabu_search(self):
+        pass
 
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
@@ -410,26 +362,30 @@ def generate_assignment(population, max_iter = 4):
                 return None #No valid assignment found, try failed
     return assignment
 
-def best_individual_iteration(population, iter_no):
+#A function that prints the current best solution after each iteration
+def iteration_statistics(population, iter_no):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
-    print(f"Iteration {iter_no}:")
-    for i, route in enumerate(best_ind.routes):
-        print(f"    Route #{i+1}: 0 {' '.join(map(str, route))} 0")
-    print(f"    Cost: {best_ind.fitness:.0f}")
+    print(f"Iteration {iter_no} Best:", end=' ')
+    routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind.routes]
+    print(' '.join(routes_str), end=' ')
+    print(f"({int(best_ind.fitness)})")
+    print("")
 
+#A function that prints the best solution found after the algorithm finishes
 def best_individual(population, elapsed_time, cpu_time):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
     for i, route in enumerate(best_ind.routes):
         print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
-    print(f"Cost {best_ind.fitness:.0f}")
+    print(f"Cost: {best_ind.fitness:.2f}")
     print(f"Elapsed Time: {elapsed_time:.2f} seconds")
     print(f"CPU Time: {cpu_time:.2f} seconds")
 
+# A function that plots the routes of the best solution found
 def plot_routes(population, individual):
     depot_x, depot_y = population.depot
     plt.figure(figsize=(8, 8))
     plt.plot(depot_x, depot_y, 'rs', markersize=10, label="Depot") #depot marker
-    for cid, (x, y) in population.coords.items(): # customer markers
+    for cid, (x, y) in population.coords.items(): #customer markers
         plt.plot(x, y, 'bo')
         plt.text(x + 0.5, y + 0.5, str(cid), fontsize=9)
     for route in individual.routes: #routes
