@@ -14,7 +14,11 @@ LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
 ALGORITHM = "ILS" # "MULTI_STAGE_HEURISTIC" or "ILS"
-ILS_META_HEURISTIC = "SA"
+
+# ILS Parameters
+ILS_META_HEURISTIC = "None"
+CURRENT_TEMPERATURE = 500
+COOLING_RATE = 0.9
 
 #%% Population and Individual classes
 class Population:
@@ -174,6 +178,7 @@ class ILSAlgorithm:
         self.population = population
 
     def solve(self):
+        global CURRENT_TEMPERATURE, COOLING_RATE
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
 
@@ -184,22 +189,28 @@ class ILSAlgorithm:
                 new_ind.evaluate()
                 self.population.individuals.append(new_ind)
 
+        iter_count = 0
         no_improvement_count = 0
         best_fitness_found = float('inf')
         while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+            CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
+            print(CURRENT_TEMPERATURE)
             for individual in self.population.individuals:
                 # local search
                 neighbor = self.find_neighbor(individual)
                 if neighbor.fitness < individual.fitness:
                     individual.routes = neighbor.routes
                     individual.fitness = neighbor.fitness
-                # else:
-                #     if ILS_META_HEURISTIC == "SA":
-                #         pass
-                #     elif ILS_META_HEURISTIC == "TS":
-                #         pass
-                #     elif ILS_META_HEURISTIC == "ILS":
-                #         pass
+                else:
+                    if ILS_META_HEURISTIC == "SA":
+                        toReplace = self.simulated_annealing(individual.fitness, neighbor.fitness)
+                        if toReplace:
+                            individual.routes = neighbor.routes
+                            individual.fitness = neighbor.fitness
+                    elif ILS_META_HEURISTIC == "TS":
+                        pass
+                    elif ILS_META_HEURISTIC == "ILS":
+                        pass
 
 
             #best individual and non-improvement updates
@@ -209,7 +220,9 @@ class ILSAlgorithm:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-
+            #best_individual_iteration(self.population, iter_count)
+            iter_count += 1
+            
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
@@ -285,8 +298,13 @@ class ILSAlgorithm:
             new_individual.evaluate()
             return new_individual
 
-    def simulated_annealing(self, solution, temp=1000, cooling=0.95, iterations=1000):
-        pass
+    def simulated_annealing(self, individual_fitness, neighbor_fitness):
+        delta = neighbor_fitness - individual_fitness
+        probability = math.exp(-delta / CURRENT_TEMPERATURE)
+        print(probability)
+        if random.random() < probability:
+            return True
+        return False
 
     def tabu_search(self, solution, iterations=1000, tabu_tenure=20):
         from collections import deque
@@ -391,6 +409,13 @@ def generate_assignment(population, max_iter = 4):
             else:
                 return None #No valid assignment found, try failed
     return assignment
+
+def best_individual_iteration(population, iter_no):
+    best_ind = min(population.individuals, key=lambda ind: ind.fitness)
+    print(f"Iteration {iter_no}:")
+    for i, route in enumerate(best_ind.routes):
+        print(f"    Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+    print(f"    Cost: {best_ind.fitness:.0f}")
 
 def best_individual(population, elapsed_time, cpu_time):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
