@@ -127,27 +127,27 @@ class MSHeuristicsAlgorithm:
         plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
 
     #A function that generates an assignment of customers to vehicles
-    def generate_assignment(self, max_iter=10):
+    def generate_assignment(self, max_iter=4):
         customers = [cid for cid in self.population.coords]
         customer_coords = {cid: np.array(self.population.coords[cid]) for cid in customers}
         customer_demands = self.population.demands
-        centroids = random.sample(customers, self.population.trucks_count)
-        assignment = [[c] for c in centroids]
-        loads = [customer_demands[c] for c in centroids]
-
+        centroids = random.sample(customers, self.population.trucks_count) #choose initial centroids randomly
+        assignment = [[c] for c in centroids] #vehicles initially includes only centroids
+        loads = [customer_demands[c] for c in centroids] #current loads for each vehicle initiallized as the centroid demand
+        
         for _ in range(max_iter):
+            #choose centroid representative as the closest one to the centroid
             new_centroids = []
             for group in assignment:
                 coords = np.array([customer_coords[cid] for cid in group])
                 center = np.mean(coords, axis=0)
                 new_representive = min(group, key=lambda cid: np.linalg.norm(customer_coords[cid] - center))
                 new_centroids.append(new_representive)
-            
             centroids = new_centroids
-            assignment = [[] for _ in centroids]
+            assignment = [[] for _ in centroids] 
             loads = [0 for _ in centroids]
 
-            # Assign customers to nearest centroid if within capacity
+            #assign customers to the closes centroid
             for cid in customers:
                 best_idx = -1
                 min_dist = float('inf')
@@ -157,15 +157,15 @@ class MSHeuristicsAlgorithm:
                         if dist < min_dist:
                             min_dist = dist
                             best_idx = idx
-
                 if best_idx != -1:
-                    assignment[best_idx].append(cid)
+                    assignment[best_idx].append(cid) #assigns customer to the best centroid found
                     loads[best_idx] += customer_demands[cid]
                 else:
-                    return None
+                    return None #No valid assignment found, try failed
 
         return assignment
 
+    #A function that order the customers in each route
     def tsp_solve(self, individual):
         optimized = []
         total_cost = 0
@@ -176,11 +176,12 @@ class MSHeuristicsAlgorithm:
         individual.routes = optimized
         individual.fitness = total_cost
 
+    #A function that reorders the route using nearest neighbor heuristic
     def nn_route_reorder(self, route):
         if not route:
             return [], 0
-        current, cost = min( ((node, np.linalg.norm(np.array(self.population.coords[node]) - np.array(self.population.depot))) for node in route), key=lambda x: x[1])
-        ordered = [current]
+        current, cost = min(((node, np.linalg.norm(np.array(self.population.coords[node]) - np.array(self.population.depot))) for node in route), key=lambda x: x[1])
+        ordered = [current] #initializing the route with the closest customer to the depot
         unvisited = set(route) 
         unvisited.remove(current)
 
@@ -193,11 +194,11 @@ class MSHeuristicsAlgorithm:
                     min_dist = d
                     nearest = node
             cost += min_dist
-            ordered.append(nearest)
+            ordered.append(nearest) #in each iteration the nearest customer is added to the route
             current = nearest
             unvisited.remove(nearest)
 
-        cost += np.linalg.norm(np.array(self.population.coords[current]) - np.array(self.population.depot))
+        cost += np.linalg.norm(np.array(self.population.coords[current]) - np.array(self.population.depot)) #adding the cost of returning to the depot
         return ordered, cost
 
 class Algorithm:
