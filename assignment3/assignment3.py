@@ -13,7 +13,7 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "MULTI_STAGE_HEURISTIC" # "MULTI_STAGE_HEURISTIC" or "ILS"
+ALGORITHM = "ILS" # "MULTI_STAGE_HEURISTIC" or "ILS"
 ILS_META_HEURISTIC = "SA"
 
 #%% Population and Individual classes
@@ -217,19 +217,39 @@ class ILSAlgorithm:
 
     def find_neighbor(self, individual):
         neighborhood_methods = ["2-opt", "reposition", "relocate", "swap"]
-        method = "2-opt" #random.choice(neighborhood_methods)
+        method = "reposition" #random.choice(neighborhood_methods)
         if method == "2-opt":
             route_idx = random.randint(0, len(individual.routes) - 1)
             route = individual.routes[route_idx]
-            #flip two customers in the route
+            if len(route) < 3:
+                return individual
             i,j = sorted(random.sample(range(len(route)), 2))
             new_route = route[:i] + list(reversed(route[i:j+1])) + route[j+1:]
             new_routes = individual.routes[:route_idx] + [new_route] + individual.routes[route_idx + 1:]
             new_individual = Individual(new_routes, self.population)
             new_individual.evaluate()
             return new_individual
-        elif method == "reposition":
-            pass
+        elif method == "reposition": #taking a random customer from a random route and placing it in another route
+            routes = [r[:] for r in individual.routes] 
+            if len(routes) < 2: #not enough routes for reposition
+                return individual
+            r1 = random.randint(0, len(routes) - 1)
+            r2 = random.randint(0, individual.population.trucks_count - 1)
+            customer_idx = random.randint(0, len(routes[r1]) - 1)
+            customer = routes[r1].pop(customer_idx)
+            if r2 >= len(routes):
+                routes.append([customer])
+                r2 = len(routes) - 1 
+            else:
+                customer_new_idx = random.randint(0, len(routes[r2]))
+                routes[r2].insert(customer_new_idx, customer)
+            if sum(self.population.demands[cid] for cid in routes[r2]) > self.population.truck_capacity:
+                return individual  
+            if not routes[r1]:
+                routes.pop(r1)
+            new_individual = Individual(routes, self.population)
+            new_individual.evaluate()
+            return new_individual
         elif method == "relocate":
             pass
         elif method == "swap":
@@ -354,16 +374,12 @@ def generate_assignment(population, max_iter = 4):
             #the case where no vehicle have enough capacity for the customer
             else:
                 return None #No valid assignment found, try failed
-
     return assignment
 
 def best_individual(population, elapsed_time, cpu_time):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
     for i, route in enumerate(best_ind.routes):
-        if route:
-            print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
-        else:
-            print(f"Route #{i+1}: 0")
+        print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
     print(f"Cost {best_ind.fitness:.0f}")
     print(f"Elapsed Time: {elapsed_time:.2f} seconds")
     print(f"CPU Time: {cpu_time:.2f} seconds")
