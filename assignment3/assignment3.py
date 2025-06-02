@@ -1,3 +1,4 @@
+#%% Imports and global variables
 import math
 import random
 import numpy as np
@@ -9,11 +10,13 @@ import matplotlib.pyplot as plt
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
+LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "MULTI_STAGE_HEURISTIC"
+ALGORITHM = "ILS" # "MULTI_STAGE_HEURISTIC" or "ILS"
+ILS_META_HEURISTIC = "SA"
 
-
+#%% Population and Individual classes
 class Population:
     def __init__(self, filepath):
         self.truck_capacity = None
@@ -86,22 +89,25 @@ class Population:
         return matrix
 
 class Individual:
-    def __init__(self, routes):
+    def __init__(self, routes, population):
         self.routes = routes
         self.fitness = 0
+        self.population = population
 
-    # def evaluate(self):
-    #     total = 0
-    #     first = (0, 0)  #depot coordinates
-    #     for route in self.routes:
-    #         if not route:
-    #             continue
-    #         route_length = self.dist_matrix[first][route[0]]
-    #         route_length += sum(self.dist_matrix[route[i]][route[i + 1]] for i in range(len(route) - 1))
-    #         route_length += self.dist_matrix[route[-1]][first]
-    #         total += route_length
-    #     return total   
+    # A function that evaluates the fitness of the individual as the total distance of all routes
+    def evaluate(self):
+        total_length = 0
+        for route in self.routes:
+            if not route:
+                continue
+            route_length = np.linalg.norm(np.array(self.population.coords[route[0]]) - np.array(self.population.depot))
+            route_length += sum(self.population.dist_matrix[route[i]][route[i + 1]] for i in range(len(route) - 1))
+            route_length += np.linalg.norm(np.array(self.population.coords[route[-1]]) - np.array(self.population.depot))
+            total_length += route_length
+        self.fitness = total_length
 
+
+#%% Multi-Stage Heuristic Algorithm
 class MSHeuristicsAlgorithm:
     def __init__(self, population):
         self.population = population
@@ -113,9 +119,9 @@ class MSHeuristicsAlgorithm:
 
         #generating the population until population size is reached or no time left
         while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
-            assignment = self.generate_assignment() #first stage
+            assignment = generate_assignment(self.population) #first stage
             if assignment:
-                new_individual = Individual(assignment) 
+                new_individual = Individual(assignment, self.population)
                 self.tsp_solve(new_individual) #second stage
                 self.population.individuals.append(new_individual)
 
@@ -125,45 +131,6 @@ class MSHeuristicsAlgorithm:
         #printing the best result found
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
         plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
-
-    #A function that generates an assignment of customers to vehicles
-    def generate_assignment(self, max_iter=4):
-        customers = [cid for cid in self.population.coords]
-        customer_coords = {cid: np.array(self.population.coords[cid]) for cid in customers}
-        customer_demands = self.population.demands
-        centroids = random.sample(customers, self.population.trucks_count) #choose initial centroids randomly
-        assignment = [[c] for c in centroids] #vehicles initially includes only centroids
-        loads = [customer_demands[c] for c in centroids] #current loads for each vehicle initiallized as the centroid demand
-        
-        for _ in range(max_iter):
-            #choose centroid representative as the closest one to the centroid
-            new_centroids = []
-            for group in assignment:
-                coords = np.array([customer_coords[cid] for cid in group])
-                center = np.mean(coords, axis=0)
-                new_representive = min(group, key=lambda cid: np.linalg.norm(customer_coords[cid] - center))
-                new_centroids.append(new_representive)
-            centroids = new_centroids
-            assignment = [[] for _ in centroids] 
-            loads = [0 for _ in centroids]
-
-            #assign customers to the closes centroid
-            for cid in customers:
-                best_idx = -1
-                min_dist = float('inf')
-                for idx, centroid in enumerate(centroids):
-                    if loads[idx] + customer_demands[cid] <= self.population.truck_capacity:
-                        dist = np.linalg.norm(customer_coords[cid] - customer_coords[centroid])
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_idx = idx
-                if best_idx != -1:
-                    assignment[best_idx].append(cid) #assigns customer to the best centroid found
-                    loads[best_idx] += customer_demands[cid]
-                else:
-                    return None #No valid assignment found, try failed
-
-        return assignment
 
     #A function that order the customers in each route
     def tsp_solve(self, individual):
@@ -201,36 +168,191 @@ class MSHeuristicsAlgorithm:
         cost += np.linalg.norm(np.array(self.population.coords[current]) - np.array(self.population.depot)) #adding the cost of returning to the depot
         return ordered, cost
 
-class Algorithm:
-    def __init__(self, population: Population, time_limit: int, T_init=100, alpha=0.95):
+#%% ILS Algorithm
+class ILSAlgorithm:
+    def __init__(self, population):
         self.population = population
-        self.T = T_init
-        self.alpha = alpha
-        self.time_limit = time_limit
 
     def solve(self):
-        start_time = time.time()
-        current = Individual(self.population)
-        best = current
+        elapsed_start_time = time.time()
+        cpu_start_time = time.process_time()
 
-        while time.time() - start_time < self.time_limit:
-            neighbor = current.neighbor()
-            delta = neighbor.fitness - current.fitness
-            if delta < 0 or random.random() < math.exp(-delta / self.T):
-                current = neighbor
-                if current.fitness < best.fitness:
-                    best = current
-            self.T *= self.alpha
+        while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
+            assignment = generate_assignment(self.population)
+            if assignment:
+                new_ind = Individual(assignment, self.population)
+                new_ind.evaluate()
+                self.population.individuals.append(new_ind)
 
-        return best
+        no_improvement_count = 0
+        best_fitness_found = float('inf')
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+            for individual in self.population.individuals:
+
+                # local search
+                neighbor = self.find_neighbor(individual)
+                if neighbor.fitness < individual.fitness:
+                    individual.routes = neighbor.routes
+                    individual.fitness = neighbor.fitness
+                else:
+                    if ILS_META_HEURISTIC == "SA":
+                        pass
+                    elif ILS_META_HEURISTIC == "TS":
+                        pass
+                    elif ILS_META_HEURISTIC == "ILS":
+                        pass
+
+            #best individual and non-improvement updates
+            best_fitness_iter = min(self.population.individuals, key=lambda ind: ind.fitness).fitness
+            if best_fitness_iter < best_fitness_found:
+                best_fitness_found = best_fitness_iter
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+
+        elapsed_end_time = time.time()
+        cpu_end_time = time.process_time()
+        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
+        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
+
+    def find_neighbor(self, individual):
+        neighborhood_methods = ["2-opt", "reposition", "relocate", "swap"]
+        method = "2-opt" #random.choice(neighborhood_methods)
+        if method == "2-opt":
+            route_idx = random.randint(0, len(individual.routes) - 1)
+            route = individual.routes[route_idx]
+            #flip two customers in the route
+            i,j = sorted(random.sample(range(len(route)), 2))
+            new_route = route[:i] + list(reversed(route[i:j+1])) + route[j+1:]
+            new_routes = individual.routes[:route_idx] + [new_route] + individual.routes[route_idx + 1:]
+            new_individual = Individual(new_routes, self.population)
+            new_individual.evaluate()
+            return new_individual
+        elif method == "reposition":
+            pass
+        elif method == "relocate":
+            pass
+        elif method == "swap":
+            pass
+
+    def simulated_annealing(self, solution, temp=1000, cooling=0.95, iterations=1000):
+        current = [r[:] for r in solution]
+        best = [r[:] for r in solution]
+        cost_current = cost_best = self.route_length(current)
+
+        for _ in range(iterations):
+            candidate = self.swap_customers(current)
+            cost_candidate = self.route_length(candidate)
+            if cost_candidate < cost_current or random.random() < math.exp((cost_current - cost_candidate) / temp):
+                current = candidate
+                cost_current = cost_candidate
+                if cost_candidate < cost_best:
+                    best = candidate
+                    cost_best = cost_candidate
+            temp *= cooling
+        return best, cost_best
+
+    def tabu_search(self, solution, iterations=1000, tabu_tenure=20):
+        from collections import deque
+        best = tuple(tuple(r) for r in solution)
+        best_cost = self.route_length(solution)
+        tabu = deque(maxlen=tabu_tenure)
+
+        for _ in range(iterations):
+            neighbor = self.swap_customers([list(r) for r in solution])
+            key = tuple(tuple(r) for r in neighbor)
+            cost = self.route_length(neighbor)
+            if key not in tabu and cost < best_cost:
+                best = key
+                best_cost = cost
+            tabu.append(key)
+        return [list(r) for r in best], best_cost
+
+    def iterative_local_search(self, solution, iterations=1000):
+        best = [r[:] for r in solution]
+        best_cost = self.route_length(best)
+
+        for _ in range(iterations):
+            local = self.local_search(best)
+            cost_local = self.route_length(local)
+            if cost_local < best_cost:
+                best = local
+                best_cost = cost_local
+            perturbed = self.swap_customers(local)
+            cost_perturbed = self.route_length(perturbed)
+            if cost_perturbed < best_cost:
+                best = perturbed
+                best_cost = cost_perturbed
+        return best, best_cost
+
+    def swap_customers(self, solution):
+        new = [r[:] for r in solution]
+        r1, r2 = random.sample(range(len(new)), 2)
+        if len(new[r1]) > 2 and len(new[r2]) > 2:
+            i = random.randint(1, len(new[r1]) - 2)
+            j = random.randint(1, len(new[r2]) - 2)
+            new[r1][i], new[r2][j] = new[r2][j], new[r1][i]
+        return new
+
+    def local_search(self, solution):
+        new = [r[:] for r in solution]
+        for route in new:
+            if len(route) > 4:
+                i = random.randint(1, len(route) - 3)
+                j = random.randint(i + 1, len(route) - 2)
+                route[i:j+1] = reversed(route[i:j+1])
+        return new
+
+#%% General Functions
+#A function that generates an assignment of customers to vehicles using k-means clustering
+def generate_assignment(population, max_iter = 4):
+    customers = [cid for cid in population.coords]
+    customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
+    customer_demands = population.demands
+    centroids = random.sample(customers, population.trucks_count) #choose initial centroids randomly
+    assignment = [[c] for c in centroids] #vehicles initially includes only centroids
+    loads = [customer_demands[c] for c in centroids] #current loads for each vehicle initiallized as the centroid demand
+    
+    for _ in range(max_iter):
+        #choose centroid representative as the closest one to the centroid
+        new_centroids = []
+        for group in assignment:
+            coords = np.array([customer_coords[cid] for cid in group])
+            center = np.mean(coords, axis=0)
+            new_representive = min(group, key=lambda cid: np.linalg.norm(customer_coords[cid] - center))
+            new_centroids.append(new_representive)
+        centroids = new_centroids
+        assignment = [[] for _ in centroids] 
+        loads = [0 for _ in centroids]
+
+        #assign customers to the closes centroid
+        for cid in customers:
+            best_idx = -1
+            min_dist = float('inf')
+            for idx, centroid in enumerate(centroids):
+                if loads[idx] + customer_demands[cid] <= population.truck_capacity:
+                    dist = np.linalg.norm(customer_coords[cid] - customer_coords[centroid])
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = idx
+            if best_idx != -1:
+                assignment[best_idx].append(cid) #assigns customer to the best centroid found
+                loads[best_idx] += customer_demands[cid]
+            else:
+                return None #No valid assignment found, try failed
+
+    return assignment
 
 def best_individual(population, elapsed_time, cpu_time):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
     for i, route in enumerate(best_ind.routes):
-        print(f"Route #{i+1}: {' '.join(map(str, route))}")
-    print(f"Cost {best_ind.fitness:.0f}")
-    print(f"Elapsed Time: {elapsed_time:.2f} seconds")
-    print(f"CPU Time: {cpu_time:.2f} seconds")
+        if route:
+            print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+        else:
+            print(f"Route #{i+1}: 0")
+        print(f"Cost {best_ind.fitness:.0f}")
+        print(f"Elapsed Time: {elapsed_time:.2f} seconds")
+        print(f"CPU Time: {cpu_time:.2f} seconds")
 
 def plot_routes(population, individual):
     depot_x, depot_y = population.depot
@@ -260,12 +382,13 @@ def plot_routes(population, individual):
     plt.axis("equal")
     plt.show()
 
-
-
+#%% Main Function
 def main(input_file):
     population = Population(input_file)
     if ALGORITHM == "MULTI_STAGE_HEURISTIC":
         solver = MSHeuristicsAlgorithm(population)
+    elif ALGORITHM == "ILS":
+        solver = ILSAlgorithm(population)
     solver.solve()
 
 if __name__ == "__main__":
