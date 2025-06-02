@@ -13,7 +13,7 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "ILS" # "MULTI_STAGE_HEURISTIC" or "ILS"
+ALGORITHM = "MULTI_STAGE_HEURISTIC" # "MULTI_STAGE_HEURISTIC" or "ILS"
 ILS_META_HEURISTIC = "SA"
 
 #%% Population and Individual classes
@@ -307,9 +307,10 @@ class ILSAlgorithm:
 #A function that generates an assignment of customers to vehicles using k-means clustering
 def generate_assignment(population, max_iter = 4):
     customers = [cid for cid in population.coords]
+    random.shuffle(customers)
     customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
     customer_demands = population.demands
-    centroids = random.sample(customers, population.trucks_count) #choose initial centroids randomly
+    centroids = [customers[0]] #choose initial centroids randomly
     assignment = [[c] for c in centroids] #vehicles initially includes only centroids
     loads = [customer_demands[c] for c in centroids] #current loads for each vehicle initiallized as the centroid demand
     
@@ -335,9 +336,22 @@ def generate_assignment(population, max_iter = 4):
                     if dist < min_dist:
                         min_dist = dist
                         best_idx = idx
+
+            #the case where the customer is closest to the depot than other centroids and there's available vehicle            
+            if len(assignment) < population.trucks_count:
+                dist_from_depot = np.linalg.norm(customer_coords[cid] - np.array(population.depot))
+                if dist_from_depot < min_dist:
+                    assignment.append([cid]) 
+                    loads.append(customer_demands[cid])
+                    centroids.append(cid) 
+                    continue
+            
+            #the case where a customer is assigned to already existing route/vehicle
             if best_idx != -1:
                 assignment[best_idx].append(cid) #assigns customer to the best centroid found
                 loads[best_idx] += customer_demands[cid]
+
+            #the case where no vehicle have enough capacity for the customer
             else:
                 return None #No valid assignment found, try failed
 
@@ -350,9 +364,9 @@ def best_individual(population, elapsed_time, cpu_time):
             print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
         else:
             print(f"Route #{i+1}: 0")
-        print(f"Cost {best_ind.fitness:.0f}")
-        print(f"Elapsed Time: {elapsed_time:.2f} seconds")
-        print(f"CPU Time: {cpu_time:.2f} seconds")
+    print(f"Cost {best_ind.fitness:.0f}")
+    print(f"Elapsed Time: {elapsed_time:.2f} seconds")
+    print(f"CPU Time: {cpu_time:.2f} seconds")
 
 def plot_routes(population, individual):
     depot_x, depot_y = population.depot
