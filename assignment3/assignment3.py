@@ -4,6 +4,8 @@ import numpy as np
 import time
 import sys
 import os
+import matplotlib.pyplot as plt
+
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
@@ -18,6 +20,7 @@ class Population:
         self.trucks_count = None
         self.coords = {}
         self.demands = {}
+        self.depot = None
         self.optimal_solution = 0
         self._parse_file(filepath)
         self.dist_matrix = self._compute_distance_matrix()
@@ -29,7 +32,9 @@ class Population:
             with open(path, 'r') as f:
                 lines = f.readlines()
             section = None
-            for line in lines:
+            depot_idx = None
+            customer_idx = 1
+            for i, line in enumerate(lines):
                 line = line.strip()
                 if line.startswith("CAPACITY"): #the truck capacity
                     self.truck_capacity = int(line.split(":")[1])
@@ -42,16 +47,29 @@ class Population:
                         self.optimal_solution = float(optimal_solution.strip())
                 elif line == "NODE_COORD_SECTION":
                     section = "coords"
+                    for j in range(i + 1, len(lines)):
+                        if lines[j].strip() == "DEPOT_SECTION":
+                            depot_idx = lines[j+1].strip()
+                            break
                 elif line == "DEMAND_SECTION":
                     section = "demands"
+                    customer_idx = 1
                 elif line == "DEPOT_SECTION":
                     break
                 elif section == "coords":
                     parts = line.split()
-                    self.coords[int(parts[0])] = (int(parts[1]), int(parts[2]))
+                    if parts[0] == depot_idx:
+                        self.depot = (int(parts[1]), int(parts[2]))
+                    else:
+                        self.coords[customer_idx] = (int(parts[1]), int(parts[2]))
+                        customer_idx += 1
                 elif section == "demands":
                     parts = line.split()
-                    self.demands[int(parts[0])] = int(parts[1])
+                    if parts[0] == depot_idx:
+                        continue
+                    else:
+                        self.demands[customer_idx] = int(parts[1])
+                        customer_idx += 1
             if not self.truck_capacity or not self.trucks_count or not self.coords or not self.demands:
                 raise ValueError("The file is not of the correct format or it missing data.")
         except Exception as e:
@@ -89,18 +107,26 @@ class MSHeuristicsAlgorithm:
         self.population = population
 
     def solve(self):
+        #initializing timer
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
+
+        #generating the population until population size is reached or no time left
         while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
-            assignment = self.generate_assignment()
+            assignment = self.generate_assignment() #first stage
             if assignment:
-                new_individual = Individual(assignment)
-                self.tsp_solve(new_individual)
+                new_individual = Individual(assignment) 
+                self.tsp_solve(new_individual) #second stage
                 self.population.individuals.append(new_individual)
+
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
-        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
 
+        #printing the best result found
+        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
+        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
+
+    #A function that generates an assignment of customers to vehicles
     def generate_assignment(self, max_iter=10):
         customers = [cid for cid in self.population.coords]
         customer_coords = {cid: np.array(self.population.coords[cid]) for cid in customers}
@@ -153,7 +179,7 @@ class MSHeuristicsAlgorithm:
     def nn_route_reorder(self, route):
         if not route:
             return [], 0
-        current, cost = min( ((node, np.linalg.norm(np.array(self.population.coords[node]) - np.array([0, 0]))) for node in route), key=lambda x: x[1])
+        current, cost = min( ((node, np.linalg.norm(np.array(self.population.coords[node]) - np.array(self.population.depot))) for node in route), key=lambda x: x[1])
         ordered = [current]
         unvisited = set(route) 
         unvisited.remove(current)
@@ -171,7 +197,7 @@ class MSHeuristicsAlgorithm:
             current = nearest
             unvisited.remove(nearest)
 
-        cost += self.population.dist_matrix[ordered[-1]][0]  
+        cost += np.linalg.norm(np.array(self.population.coords[current]) - np.array(self.population.depot))
         return ordered, cost
 
 class Algorithm:
@@ -204,6 +230,35 @@ def best_individual(population, elapsed_time, cpu_time):
     print(f"Cost {best_ind.fitness:.0f}")
     print(f"Elapsed Time: {elapsed_time:.2f} seconds")
     print(f"CPU Time: {cpu_time:.2f} seconds")
+
+def plot_routes(population, individual):
+    depot_x, depot_y = population.depot
+    plt.figure(figsize=(8, 8))
+    plt.plot(depot_x, depot_y, 'rs', markersize=10, label="Depot") #depot marker
+    for cid, (x, y) in population.coords.items(): # customer markers
+        plt.plot(x, y, 'bo')
+        plt.text(x + 0.5, y + 0.5, str(cid), fontsize=9)
+    for route in individual.routes: #routes
+        if not route:
+            continue
+        path_x = [depot_x]
+        path_y = [depot_y]
+        for cid in route:
+            x, y = population.coords[cid]
+            path_x.append(x)
+            path_y.append(y)
+        path_x.append(depot_x)
+        path_y.append(depot_y)
+        plt.plot(path_x, path_y, linestyle='-', marker='o')
+
+    plt.title("Vehicle Routes")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.legend()
+    plt.grid(True)
+    plt.axis("equal")
+    plt.show()
+
 
 
 def main(input_file):
