@@ -13,12 +13,14 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "ILS" # "MULTI_STAGE_HEURISTIC" or "ILS"
+ALGORITHM = "ILS" # ("MULTI_STAGE_HEURISTIC", "ILS")
 
 # ILS Parameters
-ILS_META_HEURISTIC = "None"
+ILS_META_HEURISTIC = "ACO" # ("SA", "TS", "ACO")
 CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
+ACO_EVAPORATION_RATE = 0.5
+ACO_Q = 100
 
 #%% Population and Individual classes
 class Population:
@@ -176,6 +178,9 @@ class MSHeuristicsAlgorithm:
 class ILSAlgorithm:
     def __init__(self, population):
         self.population = population
+        self.tabu_list = [] #for Tabu Search use 
+        self.tabu_set = set() #for Tabu Search use 
+        self.pheromone = {} #for ACO use
 
     def solve(self):
         global CURRENT_TEMPERATURE, COOLING_RATE
@@ -194,7 +199,7 @@ class ILSAlgorithm:
         best_fitness_found = float('inf')
         while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
             CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
-            for individual in self.population.individuals:
+            for i, individual in enumerate(self.population.individuals):
                 # local search
                 neighbor = self.find_neighbor(individual)
                 if neighbor.fitness < individual.fitness:
@@ -207,10 +212,31 @@ class ILSAlgorithm:
                             individual.routes = neighbor.routes
                             individual.fitness = neighbor.fitness
                     elif ILS_META_HEURISTIC == "TS":
-                        pass
-                    elif ILS_META_HEURISTIC == "ILS":
-                        pass
-
+                        if not self.tabu_list:
+                            self.tabu_hash_initiallize()
+                        neighbors = [self.find_neighbor(individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
+                        neighbors.sort(key=lambda ind: ind.fitness)
+                        for neighbor in neighbors:
+                            neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
+                            if neighbor_hash not in self.tabu_set:
+                                individual.routes = neighbor.routes
+                                individual.fitness = neighbor.fitness
+                                self.tabu_list.append(neighbor_hash)
+                                self.tabu_set.add(neighbor_hash)
+                                if len(self.tabu_list) > POPULATION_SIZE * 10:
+                                    oldest = self.tabu_list.pop(0)
+                                    self.tabu_set.remove(oldest)
+                                break
+                    elif ILS_META_HEURISTIC == "ACO":
+                        if not self.pheromone:
+                            self.pheromone_initialize()
+                            self.pheromone_update()
+                        new_individual = self.aco_solution_construct()
+                        individual.routes = new_individual.routes
+                        individual.fitness = new_individual.fitness
+                        
+                        if i == len(self.population.individuals) - 1:
+                            self.pheromone_update()
 
             #best individual and non-improvement updates
             best_fitness_iter = min(self.population.individuals, key=lambda ind: ind.fitness).fitness
@@ -228,7 +254,7 @@ class ILSAlgorithm:
         plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
 
     #A function that finds a random neighbor of an individual
-    def find_neighbor(self, individual):
+    def find_neighbor(self, individual, method = None):
         neighborhood_methods = ["2-opt", "relocate", "reposition", "swap", "shuffle"]
         method = random.choice(neighborhood_methods)
         if method == "2-opt": #reversing a random segment of a random route
@@ -306,8 +332,67 @@ class ILSAlgorithm:
             return True
         return False
 
-    def tabu_search(self):
-        pass
+    def tabu_hash_initialize(self):
+        for ind in self.population.individuals:
+            ind_hash = str(sorted([tuple(route) for route in ind.routes]))
+            self.tabu_list.append(ind_hash)
+            self.tabu_set.add(ind_hash)
+    
+    def pheromone_initialize(self):
+        for i in self.population.coords:
+            for j in self.population.coords:
+                if i != j:
+                    self.pheromone[(i, j)] = 1.0 
+    
+    def aco_solution_construct(self):
+        routes = []
+        unvisited = set(self.population.coords.keys())
+        current = random.choice(list(unvisited)) #start from a random customer
+        load = self.population.demands[current]
+        curr_route = [current]
+        unvisited.remove(current)
+        while unvisited:
+            next_customer = None
+            max_pheromone = -1
+            for customer in unvisited:
+                if load + self.population.demands[customer] <= self.population.truck_capacity:
+                    pheromone = self.pheromone.get((current, customer), 0)
+                    if pheromone > max_pheromone:
+                        max_pheromone = pheromone
+                        next_customer = customer
+            if next_customer is None:
+                routes.append(curr_route)
+                if unvisited:
+                    current = random.choice(list(unvisited))
+                    load = self.population.demands[current]
+                    curr_route = [current]
+                    unvisited.remove(current)
+                else:
+                    break
+            else:
+                curr_route.append(next_customer)
+                load += self.population.demands[next_customer]
+                unvisited.remove(next_customer)
+                current = next_customer
+
+        #add the last route if it has customers
+        if curr_route:
+            routes.append(curr_route)
+        new_individual = Individual(routes, self.population)
+        new_individual.evaluate()
+        return new_individual
+    
+    def pheromone_update(self):
+        for key in self.pheromone.keys():
+            self.pheromone[key] *= ACO_EVAPORATION_RATE 
+        
+        for individual in self.population.individuals:
+            for route in individual.routes:
+                if len(route) <= 1:
+                    continue
+                for i in range(len(route) - 1):
+                    key = (route[i], route[i + 1])
+                    self.pheromone[key] += ACO_Q / individual.fitness
 
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
