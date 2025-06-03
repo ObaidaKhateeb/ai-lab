@@ -21,6 +21,8 @@ CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
 ACO_EVAPORATION_RATE = 0.5
 ACO_Q = 100
+ACO_ALPHA = 1.0
+ACO_BETA = 2.0
 
 #%% Population and Individual classes
 class Population:
@@ -340,6 +342,8 @@ class ILSAlgorithm:
     
     def pheromone_initialize(self):
         for i in self.population.coords:
+            #self.pheromone[(i, 0)] = 1.0
+            #self.pheromone[(0, i)] = 1.0
             for j in self.population.coords:
                 if i != j:
                     self.pheromone[(i, j)] = 1.0 
@@ -353,14 +357,19 @@ class ILSAlgorithm:
         unvisited.remove(current)
         while unvisited:
             next_customer = None
-            max_pheromone = -1
+            max_pheromone = float('-inf')
             for customer in unvisited:
                 if load + self.population.demands[customer] <= self.population.truck_capacity:
-                    pheromone = self.pheromone.get((current, customer), 0)
+                    tau = self.pheromone.get((current, customer), 1.0)
+                    eta = 1.0 / (self.population.dist_matrix[current][customer] + 1e-6) #the small value to avoid division by zero
+                    pheromone = (tau ** ACO_ALPHA) * (eta ** ACO_BETA)
                     if pheromone > max_pheromone:
                         max_pheromone = pheromone
                         next_customer = customer
-            if next_customer is None:
+            tau_to_depot = self.pheromone.get((current, 0), 1.0)
+            eta_to_depot = 1.0 / (self.population.dist_matrix[current][0] + 1e-6)
+            depot_pheromone = (tau_to_depot ** ACO_ALPHA) * (eta_to_depot ** ACO_BETA)
+            if next_customer is None: # or depot_pheromone > max_pheromone:
                 routes.append(curr_route)
                 if unvisited:
                     current = random.choice(list(unvisited))
@@ -388,8 +397,10 @@ class ILSAlgorithm:
         
         for individual in self.population.individuals:
             for route in individual.routes:
-                if len(route) <= 1:
-                    continue
+                # key = (0, route[0])
+                # self.pheromone[key] += ACO_Q / individual.fitness
+                # key = (route[-1], 0)
+                # self.pheromone[key] += ACO_Q / individual.fitness
                 for i in range(len(route) - 1):
                     key = (route[i], route[i + 1])
                     self.pheromone[key] += ACO_Q / individual.fitness
