@@ -13,7 +13,7 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA)
+ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -23,6 +23,15 @@ ACO_EVAPORATION_RATE = 0.5
 ACO_Q = 100
 ACO_ALPHA = 1.0
 ACO_BETA = 2.0
+
+# GA Parameters
+MIGRATION_RATE = 0.1
+ISLANDS_COUNT = 4
+MIGRATION_INTERVAL = 10
+ELITISM_RATE = 0.1
+MUTATION_RATE = 0.25
+CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER)
+MUTATION_TYPE = "scramble" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
 class Population:
@@ -36,6 +45,8 @@ class Population:
         self._parse_file(filepath)
         self.dist_matrix = self._compute_distance_matrix()
         self.individuals = []
+        self.best_fitness = []
+        self.avg_fitness = []
 
     #A function that extracts the problem inputs
     def _parse_file(self, path):
@@ -404,9 +415,12 @@ class ILSAlgorithm:
     
     #A function that updates the pheromones after each iteration
     def pheromone_update(self):
+
+        # Evaporation phase
         for key in self.pheromone.keys():
             self.pheromone[key] *= ACO_EVAPORATION_RATE 
         
+        # Deposit phase
         for individual in self.population.individuals:
             for route in individual.routes:
                 # key = (0, route[0])
@@ -419,75 +433,261 @@ class ILSAlgorithm:
 
 #%% GA with Island Model
 class GAAlgorithm:
-    def __init__(self, population, num_islands=4, migration_interval=10, migration_size=4):
+    def __init__(self, population):
         self.population = population
-        self.num_islands = num_islands
-        self.migration_interval = migration_interval
-        self.migration_size = migration_size
-        self.islands = [[] for _ in range(num_islands)]
+        self.islands = [[] for _ in range(ISLANDS_COUNT)]
+        self.generation = 0
 
     def solve(self):
-        self.initialize_islands()
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
+        self.individual_islands_initialize()
 
-        generation = 0
-        while time.time() - elapsed_start_time < TIME_LIMIT:
-            for i in range(self.num_islands):
+        best_fitness_found = float('inf')
+        best_solution_found = None
+        no_improvement_count = 0
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+            for i in range(ISLANDS_COUNT):
                 self.islands[i] = self.evolve_island(self.islands[i])
-            if generation % self.migration_interval == 0:
+            if self.generation % MIGRATION_INTERVAL == 0:
                 self.migrate()
-            generation += 1
+            self.generation += 1
 
-        all_individuals = [ind for island in self.islands for ind in island]
-        self.population.individuals = all_individuals
+            self.population.individuals = [ind for island in self.islands for ind in island]
+
+            #best individual and non-improvement updates
+            best_solution_iter = min(self.population.individuals, key=lambda ind: ind.fitness)
+            if best_solution_iter.fitness < best_fitness_found:
+                best_fitness_found = best_solution_iter.fitness
+                best_solution_found = best_solution_iter.routes
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            iteration_statistics(self.population, self.generation)
 
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
 
-        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
+        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
         plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
 
-    def initialize_islands(self):
-        while len([ind for island in self.islands for ind in island]) < POPULATION_SIZE:
+    # A function that initializes the individuals and the islands 
+    def individual_islands_initialize(self):
+        individual_idx = 0
+        while individual_idx < POPULATION_SIZE:
             assignment = generate_assignment(self.population)
             if assignment:
                 new_ind = Individual(assignment, self.population)
                 new_ind.evaluate()
-                island_idx = random.randint(0, self.num_islands - 1)
+                island_idx = individual_idx % ISLANDS_COUNT
                 self.islands[island_idx].append(new_ind)
+                individual_idx += 1
 
-    def crossover(self, parent1, parent2):
-        child_routes = []
-        for r1, r2 in zip(parent1.routes, parent2.routes):
-            split = random.randint(1, min(len(r1), len(r2)) - 1) if r1 and r2 else 0
-            child = r1[:split] + [c for c in r2 if c not in r1[:split]]
-            if sum(self.population.demands[cid] for cid in child) <= self.population.truck_capacity:
-                child_routes.append(child)
-        if not child_routes:
-            return parent1
-        return Individual(child_routes, self.population)
-
-    def mutate(self, individual):
-        return ILSAlgorithm(self.population).find_neighbor(individual, method="shuffle")
-
+    # A function that performs the migration process
     def migrate(self):
-        migrants = [sorted(island, key=lambda ind: ind.fitness)[:self.migration_size] for island in self.islands]
-        for i in range(self.num_islands):
+        migrants = []
+        for i, island in enumerate(self.islands):
+            migrants_num = int(len(island) * MIGRATION_RATE * 0.5)
+            self.islands[i].sort(key=lambda ind: ind.fitness)
+            island_best_migrants = island[:migrants_num] #choose migrants out of the best
+            rest_of_island = self.islands[i][migrants_num:]
+            self.islands[i] = self.islands[i][:len(island) - migrants_num * 2] #remove the worst individuals from the island
+            random.shuffle(rest_of_island)
+            island_random_migrants = rest_of_island[:migrants_num] #choose random migrants
+            migrants.append(island_random_migrants + island_best_migrants)
+
+        for i in range(ISLANDS_COUNT):
             for m in migrants[i]:
-                target = (i + 1) % self.num_islands
+                target = (i + 1) % ISLANDS_COUNT
                 self.islands[target].append(m)
 
     def evolve_island(self, island):
-        next_gen = []
+        next_gen = sorted(island, key=lambda ind: ind.fitness)[:int(ELITISM_RATE * len(island))] #keep the elite for the next generation
         while len(next_gen) < len(island):
             parents = random.sample(island, 2)
             child = self.crossover(parents[0], parents[1])
-            if random.random() < 0.2:
+            if random.random() < MUTATION_RATE:
                 child = self.mutate(child)
+            child = Individual(child, self.population)
             child.evaluate()
             next_gen.append(child)
-        return sorted(next_gen, key=lambda ind: ind.fitness)[:len(island)]
+        return sorted(next_gen, key=lambda ind: ind.fitness)
+
+    def crossover(self, parent1, parent2):
+        genome1 = self.routes_to_permutation(parent1.routes)
+        genome2 = self.routes_to_permutation(parent2.routes)
+        if CROSSOVER_TYPE == "PMX":
+            child = self.pmx_crossover(genome1, genome2)
+        elif CROSSOVER_TYPE == "OX":
+            child = self.order_crossover(genome1, genome2)
+        elif CROSSOVER_TYPE == "CX":
+            child = self.cx_crossover(genome1, genome2)
+        elif CROSSOVER_TYPE == "ER":
+            child = self.er_crossover(genome1, genome2)
+
+        return self.permutation_to_routes(child)
+
+    def pmx_crossover(self, p1, p2):
+        size = len(p1)
+        indices_to_copy = random.sample(range(size), size // 2)
+        child = [p1[i] if i in indices_to_copy else None for i in range(size)]
+        for i in range(size):
+            if child[i] is None:
+                gene = p2[i]
+                while gene in child:
+                    index = p1.index(gene)
+                    gene = p2[index]
+                child[i] = gene
+        return (child)
+
+    def order_crossover(self, p1, p2):
+        size = len(p1)
+        a, b = sorted(random.sample(range(size), 2))
+        middle = p1[a:b]
+        remaining = [item for item in p2 if item not in middle]
+        return remaining[:a] + middle + remaining[a:]
+
+    def cx_crossover(self, p1, p2):
+        size = len(p1)
+        child = [None] * size
+        indices = list(range(size))
+        cycle = 0
+        while None in child:
+            start = indices[0]
+            idx = start
+            while True:
+                if cycle % 2 == 0:
+                    child[idx] = p1[idx]
+                else:
+                    child[idx] = p2[idx]
+                indices.remove(idx)
+                idx = p1.index(p2[idx])
+                if idx == start:
+                    break
+            cycle += 1
+        return (child)
+
+    def er_crossover(self, p1, p2):
+        size = len(p1)
+        child = []
+        used = set()
+        def get_neighbors(p):
+            neighbors = {i: set() for i in p}
+            for i in range(len(p)):
+                a, b = p[i], p[(i + 1) % size]
+                neighbors[a].add(b)
+                neighbors[b].add(a)
+            return neighbors
+        n1 = get_neighbors(p1)
+        n2 = get_neighbors(p2)
+        neighbors = {k: n1[k].union(n2[k]) for k in n1}
+        current = random.choice(p1)
+        child.append(current)
+        used.add(current)
+        while len(child) < size:
+            common = n1[current].intersection(n2[current]) - used
+            if common:
+                next_city = min(common)
+            else:
+                candidates = neighbors[current] - used
+                if candidates:
+                    next_city = min(candidates)
+                else:
+                    remaining = [c for c in p1 if c not in used]
+                    next_city = min(remaining)
+            child.append(next_city)
+            used.add(next_city)
+            current = next_city
+        return (child)
+
+    #A function that mutates the individual
+    def mutate(self, individual):
+        individual_genome = self.routes_to_permutation(individual)
+        if MUTATION_TYPE == "displacement":
+            self.displacement_mutate(individual_genome)
+        elif MUTATION_TYPE == "swap":
+            self.swap_mutate(individual_genome)
+        elif MUTATION_TYPE == "insertion":
+            self.insertion_mutate(individual_genome)
+        elif MUTATION_TYPE == "simple_inversion":
+            self.simple_inversion_mutate(individual_genome)
+        elif MUTATION_TYPE == "inversion":
+            self.inversion_mutate(individual_genome)
+        elif MUTATION_TYPE == "scramble":
+            self.scramble_mutate(individual_genome)
+        return self.permutation_to_routes(individual_genome)
+
+    def displacement_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        if i > j:
+            i, j = j, i
+        segment = genome[i:j + 1]
+        remainder = genome[:i] + genome[j + 1:]
+        insertion_place = random.randint(0, len(remainder))
+        genome = remainder[:insertion_place] + segment + remainder[insertion_place:]
+        return genome
+
+    def swap_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        genome[i], genome[j] = genome[j], genome[i]
+        return genome
+
+    def insertion_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        gene = genome.pop(i)
+        genome.insert(j, gene)
+        return genome
+
+    def simple_inversion_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        if i > j:
+            i, j = j, i
+        segment = genome[i:j + 1]
+        segment.reverse()
+        genome = genome[:i] + segment + genome[j + 1:]
+
+    def inversion_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        if i > j:
+            i, j = j, i
+        segment = genome[i:j + 1]
+        segment.reverse()
+        remainder = genome[:i] + genome[j + 1:]
+        insertion_place = random.randint(0, len(remainder))
+        genome = remainder[:insertion_place] + segment + remainder[insertion_place:]
+
+    def scramble_mutate(self, genome):
+        i, j = random.sample(range(len(genome)), 2)
+        if i > j:
+            i, j = j, i
+        segment = genome[i:j + 1]
+        random.shuffle(segment)
+        genome = genome[:i] + segment + genome[j + 1:]
+        return genome
+
+    #A function that converts individual representation to permutation
+    def routes_to_permutation(self, individual):
+        permutation = []
+        for route in individual:
+            permutation.extend(route)
+        return permutation
+
+    #A function that converts permutation representation to routes
+    def permutation_to_routes(self, permutation):
+        routes = []
+        current_route = []
+        demand = 0
+        for cid in permutation:
+            if demand + self.population.demands[cid] > self.population.truck_capacity:
+                routes.append(current_route)
+                current_route = [cid]
+                demand = self.population.demands[cid]
+            else:
+                current_route.append(cid)
+                demand += self.population.demands[cid]
+        if current_route:
+            routes.append(current_route)
+        return routes
 
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
@@ -545,6 +745,8 @@ def generate_assignment(population, max_iter = 4):
 #A function that prints the current best solution after each iteration
 def iteration_statistics(population, iter_no):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
+    population.best_fitness.append(best_ind.fitness)
+    population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
     print(f"Iteration {iter_no} Best:", end=' ')
     routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind.routes]
     print(' '.join(routes_str), end=' ')
