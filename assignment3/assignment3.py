@@ -13,10 +13,10 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA)
+ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA)
 
 # ILS Parameters
-ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
+ILS_META_HEURISTIC = "SA" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
 ACO_EVAPORATION_RATE = 0.5
@@ -221,7 +221,7 @@ class ILSAlgorithm:
                         individual.fitness = neighbor.fitness
                     elif ILS_META_HEURISTIC in ["SA", "TS"]:
                         if ILS_META_HEURISTIC == "SA":
-                            toReplace = self.simulated_annealing(individual.fitness, neighbor.fitness)
+                            toReplace = simulated_annealing(individual.fitness, neighbor.fitness)
                             if toReplace:
                                 individual.routes = neighbor.routes
                                 individual.fitness = neighbor.fitness
@@ -338,14 +338,6 @@ class ILSAlgorithm:
             new_individual = Individual(routes, self.population)
             new_individual.evaluate()
             return new_individual
-
-    #A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
-    def simulated_annealing(self, individual_fitness, neighbor_fitness):
-        delta = neighbor_fitness - individual_fitness
-        probability = math.exp(-delta / CURRENT_TEMPERATURE)
-        if random.random() < probability:
-            return True
-        return False
 
     #A function that initializes the tabu list and set with the hash of current population individuals
     def tabu_hash_initiallize(self):
@@ -741,6 +733,14 @@ def generate_assignment(population, max_iter = 4):
             else:
                 return None #No valid assignment found, try failed
     return assignment
+
+#A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
+def simulated_annealing(individual_fitness, neighbor_fitness):
+    delta = neighbor_fitness - individual_fitness
+    probability = math.exp(-delta / CURRENT_TEMPERATURE)
+    if random.random() < probability:
+        return True
+    return False
 
 #A function that prints the current best solution after each iteration
 def iteration_statistics(population, iter_no):
