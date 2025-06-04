@@ -13,10 +13,10 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA)
+ALGORITHM = "ALNS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS)
 
 # ILS Parameters
-ILS_META_HEURISTIC = "SA" # (None, SA, TS, ACO)
+ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
 ACO_EVAPORATION_RATE = 0.5
@@ -196,7 +196,6 @@ class ILSAlgorithm:
         self.pheromone = {} #for ACO use
 
     def solve(self):
-        global CURRENT_TEMPERATURE, COOLING_RATE
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
 
@@ -212,35 +211,39 @@ class ILSAlgorithm:
         best_fitness_found = float('inf')
         best_solution_found = None
         while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
-            CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
+            update_temperature()
             for i, individual in enumerate(self.population.individuals):
-                if ILS_META_HEURISTIC in ["None", "SA", "TS"]:
-                    neighbor = self.find_neighbor(individual) 
+                if ILS_META_HEURISTIC == "None":
+                    neighbor = find_neighbor(self.population, individual) 
                     if neighbor.fitness < individual.fitness:
                         individual.routes = neighbor.routes
                         individual.fitness = neighbor.fitness
-                    elif ILS_META_HEURISTIC in ["SA", "TS"]:
-                        if ILS_META_HEURISTIC == "SA":
-                            toReplace = simulated_annealing(individual.fitness, neighbor.fitness)
-                            if toReplace:
-                                individual.routes = neighbor.routes
-                                individual.fitness = neighbor.fitness
-                        elif ILS_META_HEURISTIC == "TS":
-                            if not self.tabu_list:
-                                self.tabu_hash_initiallize()
-                            neighbors = [self.find_neighbor(individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
-                            neighbors.sort(key=lambda ind: ind.fitness)
-                            for neighbor in neighbors:
-                                neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
-                                if neighbor_hash not in self.tabu_set:
-                                    individual.routes = neighbor.routes
-                                    individual.fitness = neighbor.fitness
-                                    self.tabu_list.append(neighbor_hash)
-                                    self.tabu_set.add(neighbor_hash)
-                                    if len(self.tabu_list) > POPULATION_SIZE * 10:
-                                        oldest = self.tabu_list.pop(0)
-                                        self.tabu_set.discard(oldest)
-                                    break
+                elif ILS_META_HEURISTIC == "SA":
+                    neighbor = find_neighbor(self.population, individual) 
+                    if neighbor.fitness < individual.fitness:
+                        individual.routes = neighbor.routes
+                        individual.fitness = neighbor.fitness
+                    else:
+                        toReplace = simulated_annealing(individual.fitness, neighbor.fitness)
+                        if toReplace:
+                            individual.routes = neighbor.routes
+                            individual.fitness = neighbor.fitness
+                elif ILS_META_HEURISTIC == "TS":
+                    if not self.tabu_list:
+                        self.tabu_hash_initiallize()
+                    neighbors = [find_neighbor(self.population, individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
+                    neighbors.sort(key=lambda ind: ind.fitness)
+                    for neighbor in neighbors:
+                        neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
+                        if neighbor_hash not in self.tabu_set:
+                            individual.routes = neighbor.routes
+                            individual.fitness = neighbor.fitness
+                            self.tabu_list.append(neighbor_hash)
+                            self.tabu_set.add(neighbor_hash)
+                            if len(self.tabu_list) > POPULATION_SIZE * 10:
+                                oldest = self.tabu_list.pop(0)
+                                self.tabu_set.discard(oldest)
+                            break
                 elif ILS_META_HEURISTIC == "ACO":
                     if not self.pheromone:
                         self.pheromone_initialize()
@@ -266,78 +269,7 @@ class ILSAlgorithm:
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
-
-    #A function that finds a random neighbor of an individual
-    def find_neighbor(self, individual, method = None):
-        neighborhood_methods = ["2-opt", "relocate", "reposition", "swap", "shuffle"]
-        method = random.choice(neighborhood_methods)
-        if method == "2-opt": #reversing a random segment of a random route
-            route_idx = random.randint(0, len(individual.routes) - 1)
-            route = individual.routes[route_idx]
-            if len(route) < 3:
-                return individual
-            i,j = sorted(random.sample(range(len(route)), 2))
-            new_route = route[:i] + list(reversed(route[i:j+1])) + route[j+1:]
-            new_routes = individual.routes[:route_idx] + [new_route] + individual.routes[route_idx + 1:]
-            new_individual = Individual(new_routes, self.population)
-            new_individual.evaluate()
-            return new_individual
-        elif method == "relocate": #taking a random customer from a random route and placing it in another route
-            routes = [r[:] for r in individual.routes] 
-            if len(routes) < 2: #not enough routes for reposition
-                return individual
-            r1 = random.randint(0, len(routes) - 1)
-            r2 = random.randint(0, individual.population.trucks_count - 1)
-            customer_idx = random.randint(0, len(routes[r1]) - 1)
-            customer = routes[r1].pop(customer_idx)
-            if r2 >= len(routes):
-                routes.append([customer])
-                r2 = len(routes) - 1 
-            else:
-                customer_new_idx = random.randint(0, len(routes[r2]))
-                routes[r2].insert(customer_new_idx, customer)
-            if sum(self.population.demands[cid] for cid in routes[r2]) > self.population.truck_capacity:
-                return individual  
-            if not routes[r1]:
-                routes.pop(r1)
-            new_individual = Individual(routes, self.population)
-            new_individual.evaluate()
-            return new_individual
-        elif method == "reposition": #re-placing a random customer in a random position inside its route
-            routes = [r[:] for r in individual.routes]
-            route = random.choice(routes)
-            if len(route) < 2:
-                return individual
-            curr_idx, new_idx = random.sample(range(len(route)), 2)
-            customer = route.pop(curr_idx)
-            if new_idx > curr_idx:
-                new_idx -= 1
-            route.insert(new_idx, customer)
-            new_individual = Individual(routes, self.population)
-            new_individual.evaluate()
-            return new_individual
-        elif method == "swap":
-            routes = [r[:] for r in individual.routes] 
-            if len(routes) < 2: #not enough routes for reposition
-                return individual
-            r1, r2 = random.sample(range(len(routes)), 2)
-            cus1_idx = random.randint(0, len(routes[r1]) - 1)
-            cus2_idx = random.randint(0, len(routes[r2]) - 1)
-            routes[r1][cus1_idx], routes[r2][cus2_idx] = routes[r2][cus2_idx], routes[r1][cus1_idx]
-            if sum(self.population.demands[cid] for cid in routes[r1]) > self.population.truck_capacity or \
-               sum(self.population.demands[cid] for cid in routes[r2]) > self.population.truck_capacity:
-                return individual  
-            new_individual = Individual(routes, self.population)
-            new_individual.evaluate()
-            return new_individual
-        elif method == "shuffle": #choose a random route and shuffling its customers
-            routes = [r[:] for r in individual.routes]
-            route_idx = random.randint(0, len(routes) - 1)
-            random.shuffle(routes[route_idx])
-            new_individual = Individual(routes, self.population)
-            new_individual.evaluate()
-            return new_individual
+        plot_routes(self.population, best_solution_found)
 
     #A function that initializes the tabu list and set with the hash of current population individuals
     def tabu_hash_initiallize(self):
@@ -461,7 +393,7 @@ class GAAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
+        plot_routes(self.population, best_solution_found)
 
     # A function that initializes the individuals and the islands 
     def individual_islands_initialize(self):
@@ -681,6 +613,79 @@ class GAAlgorithm:
             routes.append(current_route)
         return routes
 
+#%% ALNS Algorithm
+class ALNSAlgorithm:
+    def __init__(self, population):
+        self.population = population
+        self.operators = ["relocate", "swap", "remove_insert", "inversion"]
+        self.operator_weights = [1.0] * len(self.operators)
+        self.scores = [0.0] * len(self.operators)
+        self.uses = [1] * len(self.operators)
+
+    def solve(self):
+        elapsed_start_time = time.time()
+        cpu_start_time = time.process_time()
+
+        while len(self.population.individuals) < POPULATION_SIZE and time.time() - elapsed_start_time < TIME_LIMIT:
+            assignment = generate_assignment(self.population)
+            if assignment:
+                new_ind = Individual(assignment, self.population)
+                new_ind.evaluate()
+                self.population.individuals.append(new_ind)
+
+        best_fitness_found = float('inf')
+        best_solution_found = None
+        no_improvement_count = 0
+        iter_count = 0
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+            update_temperature()
+            for individual in self.population.individuals:
+                op_idx = self.select_operator()
+                self.uses[op_idx] += 1
+                new_ind = find_neighbor(self.population, individual, method=self.operators[op_idx])
+                if new_ind.fitness < individual.fitness:
+                    individual.routes = new_ind.routes
+                    individual.fitness = new_ind.fitness
+                    self.scores[op_idx] += 1
+                else:
+                    if simulated_annealing(individual.fitness, new_ind.fitness):
+                        individual.routes = new_ind.routes
+                        individual.fitness = new_ind.fitness
+            
+            self.update_weights()
+
+            #best individual and non-improvement updates
+            best_solution_iter = min(self.population.individuals, key=lambda ind: ind.fitness)
+            if best_solution_iter.fitness < best_fitness_found:
+                best_fitness_found = best_solution_iter.fitness
+                best_solution_found = best_solution_iter.routes
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            iteration_statistics(self.population, iter_count)
+            iter_count += 1
+
+        elapsed_end_time = time.time()
+        cpu_end_time = time.process_time()
+        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
+        plot_routes(self.population, best_solution_found)
+
+    def select_operator(self):
+        total = sum(self.operator_weights)
+        probs = [w / total for w in self.operator_weights]
+        r = random.random()
+        acc = 0.0
+        for i, p in enumerate(probs):
+            acc += p
+            if r <= acc:
+                return i
+        return len(probs) - 1
+
+    def update_weights(self):
+        for i in range(len(self.operator_weights)):
+            self.operator_weights[i] = (0.8 * self.operator_weights[i]) + (0.2 * (self.scores[i] / self.uses[i]))
+
+
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
 def generate_assignment(population, max_iter = 4):
@@ -742,6 +747,69 @@ def simulated_annealing(individual_fitness, neighbor_fitness):
         return True
     return False
 
+def update_temperature():
+    global CURRENT_TEMPERATURE, COOLING_RATE
+    CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
+
+#A function that finds a random neighbor of an individual
+def find_neighbor(population, individual, method = None):
+    if not method:
+        neighborhood_methods = ["2-opt", "relocate", "reposition", "swap", "shuffle"]
+        method = random.choice(neighborhood_methods)
+    routes = [r[:] for r in individual.routes]
+    if method == "2-opt": #reversing a random segment of a random route
+        route_idx = random.randint(0, len(routes) - 1)
+        route = routes[route_idx]
+        if len(route) < 3:
+            return individual
+        i,j = sorted(random.sample(range(len(route)), 2))
+        new_route = route[:i] + list(reversed(route[i:j+1])) + route[j+1:]
+        new_routes = individual.routes[:route_idx] + [new_route] + individual.routes[route_idx + 1:]
+        routes = new_routes
+    elif method == "relocate": #taking a random customer from a random route and placing it in another route
+        if len(routes) < 2: #not enough routes for reposition
+            return individual
+        r1 = random.randint(0, len(routes) - 1)
+        r2 = random.randint(0, individual.population.trucks_count - 1)
+        customer_idx = random.randint(0, len(routes[r1]) - 1)
+        customer = routes[r1].pop(customer_idx)
+        if r2 >= len(routes):
+            routes.append([customer])
+            r2 = len(routes) - 1 
+        else:
+            customer_new_idx = random.randint(0, len(routes[r2]))
+            routes[r2].insert(customer_new_idx, customer)
+        if sum(population.demands[cid] for cid in routes[r2]) > population.truck_capacity:
+            return individual  
+        if not routes[r1]:
+            routes.pop(r1)
+    elif method == "reposition": #re-placing a random customer in a random position inside its route
+        route = random.choice(routes)
+        if len(route) < 2:
+            return individual
+        curr_idx, new_idx = random.sample(range(len(route)), 2)
+        customer = route.pop(curr_idx)
+        if new_idx > curr_idx:
+            new_idx -= 1
+        route.insert(new_idx, customer)
+    elif method == "swap":
+        if len(routes) < 2: #not enough routes for reposition
+            return individual
+        r1, r2 = random.sample(range(len(routes)), 2)
+        cus1_idx = random.randint(0, len(routes[r1]) - 1)
+        cus2_idx = random.randint(0, len(routes[r2]) - 1)
+        routes[r1][cus1_idx], routes[r2][cus2_idx] = routes[r2][cus2_idx], routes[r1][cus1_idx]
+        if sum(population.demands[cid] for cid in routes[r1]) > population.truck_capacity or \
+            sum(population.demands[cid] for cid in routes[r2]) > population.truck_capacity:
+            return individual  
+    elif method == "shuffle": #choose a random route and shuffling its customers
+        routes = [r[:] for r in individual.routes]
+        route_idx = random.randint(0, len(routes) - 1)
+        random.shuffle(routes[route_idx])
+    new_individual = Individual(routes, population)
+    new_individual.evaluate()
+    return new_individual
+
 #A function that prints the current best solution after each iteration
 def iteration_statistics(population, iter_no):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
@@ -768,14 +836,14 @@ def best_individual(population, elapsed_time, cpu_time, best_solution = None, be
     print(f"CPU Time: {cpu_time:.2f} seconds")
 
 # A function that plots the routes of the best solution found
-def plot_routes(population, individual):
+def plot_routes(population, routes):
     depot_x, depot_y = population.depot
     plt.figure(figsize=(8, 8))
     plt.plot(depot_x, depot_y, 'rs', markersize=10, label="Depot") #depot marker
     for cid, (x, y) in population.coords.items(): #customer markers
         plt.plot(x, y, 'bo')
         plt.text(x + 0.5, y + 0.5, str(cid), fontsize=9)
-    for route in individual.routes: #routes
+    for route in routes: #routes
         if not route:
             continue
         path_x = [depot_x]
@@ -805,6 +873,8 @@ def main(input_file):
         solver = ILSAlgorithm(population)
     elif ALGORITHM == "GA":
         solver = GAAlgorithm(population)
+    elif ALGORITHM == "ALNS":
+        solver = ALNSAlgorithm(population)
     solver.solve()
 
 if __name__ == "__main__":
