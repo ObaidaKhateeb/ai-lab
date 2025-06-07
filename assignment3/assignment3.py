@@ -13,7 +13,7 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP"
-ALGORITHM = "ALNS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS)
+ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -149,7 +149,7 @@ class MSHeuristicsAlgorithm:
 
         #printing the best result found
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
-        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness))
+        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness).routes)
 
     #A function that order the customers in each route
     def tsp_solve(self, individual):
@@ -425,6 +425,7 @@ class GAAlgorithm:
                 target = (i + 1) % ISLANDS_COUNT
                 self.islands[target].append(m)
 
+    # A function that generate the next generation of individuals for the island
     def evolve_island(self, island):
         next_gen = sorted(island, key=lambda ind: ind.fitness)[:int(ELITISM_RATE * len(island))] #keep the elite for the next generation
         while len(next_gen) < len(island):
@@ -437,6 +438,7 @@ class GAAlgorithm:
             next_gen.append(child)
         return sorted(next_gen, key=lambda ind: ind.fitness)
 
+    # A function that performs crossover between two parents
     def crossover(self, parent1, parent2):
         genome1 = self.routes_to_permutation(parent1.routes)
         genome2 = self.routes_to_permutation(parent2.routes)
@@ -670,6 +672,7 @@ class ALNSAlgorithm:
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
         plot_routes(self.population, best_solution_found)
 
+    # A function that selects an operator, using a weighted random choice
     def select_operator(self):
         total = sum(self.operator_weights)
         probs = [w / total for w in self.operator_weights]
@@ -681,9 +684,67 @@ class ALNSAlgorithm:
                 return i
         return len(probs) - 1
 
+    # A function that updates the operator weights based on their uses and scores
     def update_weights(self):
         for i in range(len(self.operator_weights)):
             self.operator_weights[i] = (0.8 * self.operator_weights[i]) + (0.2 * (self.scores[i] / self.uses[i]))
+
+#%% Branch and Bound Algorithm for CVRP
+class BranchAndBoundAlgorithm:
+    def __init__(self, population):
+        self.population = population
+        self.best_solution = None
+        self.best_cost = float('inf')
+
+    def solve(self):
+        elapsed_start_time = time.time()
+        cpu_start_time = time.process_time()
+
+        customers = list(self.population.coords.keys())
+        initial_state = ([], customers, 0, [])  # (current_route, remaining_customers, current_cost, all_routes)
+        stack = [initial_state]
+
+        while stack and time.time() - elapsed_start_time < TIME_LIMIT:
+            route, remaining, cost, all_routes = stack.pop()
+
+            if not remaining:
+                total_routes = all_routes + [route] if route else all_routes
+                total_cost = self.calculate_total_cost(total_routes)
+                if total_cost < self.best_cost:
+                    self.best_cost = total_cost
+                    self.best_solution = total_routes
+                continue
+
+            for i, customer in enumerate(remaining):
+                new_route = route + [customer]
+                new_demand = sum(self.population.demands[c] for c in new_route)
+                new_remaining = remaining[:i] + remaining[i+1:]
+
+                if new_demand <= self.population.truck_capacity:
+                    stack.append((new_route, new_remaining, cost, all_routes))
+                else:
+                    if route:  # finalize current route and start a new one with customer
+                        stack.append(([customer], new_remaining, cost, all_routes + [route]))
+
+        elapsed_end_time = time.time()
+        cpu_end_time = time.process_time()
+
+        if self.best_solution:
+            best_ind = Individual(self.best_solution, self.population)
+            best_ind.fitness = self.best_cost
+            best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
+            plot_routes(self.population, best_ind.routes)
+
+    def estimate_cost(self, route):
+        if not route:
+            return 0
+        cost = np.linalg.norm(np.array(self.population.coords[route[0]]) - np.array(self.population.depot))
+        cost += sum(self.population.dist_matrix[route[i]][route[i + 1]] for i in range(len(route) - 1))
+        cost += np.linalg.norm(np.array(self.population.coords[route[-1]]) - np.array(self.population.depot))
+        return cost
+
+    def calculate_total_cost(self, routes):
+        return sum(self.estimate_cost(route) for route in routes)
 
 
 #%% General Functions
@@ -739,17 +800,41 @@ def generate_assignment(population, max_iter = 4):
                 return None #No valid assignment found, try failed
     return assignment
 
-#A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
-def simulated_annealing(individual_fitness, neighbor_fitness):
-    delta = neighbor_fitness - individual_fitness
-    probability = math.exp(-delta / CURRENT_TEMPERATURE)
-    if random.random() < probability:
-        return True
-    return False
+#A function that order the customers in each route
+def tsp_solve(population, individual):
+    optimized = []
+    total_cost = 0
+    for route in individual.routes:
+        ordered, cost = nn_route_reorder(population, route)
+        optimized.append(ordered)
+        total_cost += cost
+    individual.routes = optimized
+    individual.fitness = total_cost
 
-def update_temperature():
-    global CURRENT_TEMPERATURE, COOLING_RATE
-    CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
+#A function that reorders the route using nearest neighbor heuristic
+def nn_route_reorder(population, route):
+    if not route:
+        return [], 0
+    current, cost = min(((node, np.linalg.norm(np.array(population.coords[node]) - np.array(population.depot))) for node in route), key=lambda x: x[1])
+    ordered = [current] #initializing the route with the closest customer to the depot
+    unvisited = set(route) 
+    unvisited.remove(current)
+
+    while unvisited:
+        nearest = None
+        min_dist = float('inf')
+        for node in unvisited:
+            d = population.dist_matrix[current][node]
+            if d < min_dist:
+                min_dist = d
+                nearest = node
+        cost += min_dist
+        ordered.append(nearest) #in each iteration the nearest customer is added to the route
+        current = nearest
+        unvisited.remove(nearest)
+
+    cost += np.linalg.norm(np.array(population.coords[current]) - np.array(population.depot)) #adding the cost of returning to the depot
+    return ordered, cost
 
 #A function that finds a random neighbor of an individual
 def find_neighbor(population, individual, method = None):
@@ -810,6 +895,19 @@ def find_neighbor(population, individual, method = None):
     new_individual.evaluate()
     return new_individual
 
+#A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
+def simulated_annealing(individual_fitness, neighbor_fitness):
+    delta = neighbor_fitness - individual_fitness
+    probability = math.exp(-delta / CURRENT_TEMPERATURE)
+    if random.random() < probability:
+        return True
+    return False
+
+# A function that updates the current temperature for simulated annealing as the algorithm progresses
+def update_temperature():
+    global CURRENT_TEMPERATURE, COOLING_RATE
+    CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
+
 #A function that prints the current best solution after each iteration
 def iteration_statistics(population, iter_no):
     best_ind = min(population.individuals, key=lambda ind: ind.fitness)
@@ -843,7 +941,7 @@ def plot_routes(population, routes):
     for cid, (x, y) in population.coords.items(): #customer markers
         plt.plot(x, y, 'bo')
         plt.text(x + 0.5, y + 0.5, str(cid), fontsize=9)
-    for route in routes: #routes
+    for route in routes: 
         if not route:
             continue
         path_x = [depot_x]
@@ -875,6 +973,8 @@ def main(input_file):
         solver = GAAlgorithm(population)
     elif ALGORITHM == "ALNS":
         solver = ALNSAlgorithm(population)
+    elif ALGORITHM == "BB":
+        solver = BranchAndBoundAlgorithm(population)
     solver.solve()
 
 if __name__ == "__main__":
