@@ -12,8 +12,8 @@ TIME_LIMIT = 0
 POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
-PROBLEM = "CVRP"
-ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+PROBLEM = "CVRP" # (CVRP, ACKLEY)
+ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -34,7 +34,7 @@ CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER)
 MUTATION_TYPE = "scramble" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
-class Population:
+class CVRPPopulation:
     def __init__(self, filepath):
         self.truck_capacity = None
         self.trucks_count = None
@@ -107,7 +107,7 @@ class Population:
                 matrix[i][j] = np.linalg.norm(np.array(self.coords[i]) - np.array(self.coords[j]))
         return matrix
 
-class Individual:
+class CVRPIndividual:
     def __init__(self, routes, population):
         self.routes = routes
         self.fitness = 0
@@ -125,6 +125,31 @@ class Individual:
             total_length += route_length
         self.fitness = total_length
 
+class AckleyPopulation:
+    def __init__(self):
+        self.dim = 10
+        self.lower_bound = -32.768
+        self.upper_bound = 32.768
+        self.a = 20
+        self.b = 0.2
+        self.c = 2 * math.pi
+        self.individuals = []
+        self.best_fitness = []
+        self.avg_fitness = []
+
+class AckleyIndividual:
+    def __init__(self, vector, population):
+        self.population = population
+        self.vector = vector
+        self.fitness = 0
+
+    def evaluate(self, vector):
+        sum_sq = np.sum(vector ** 2)
+        sum_cos = np.sum(np.cos(self.population.c * vector))
+        term1 = -self.population.a * np.exp(-self.population.b * np.sqrt(sum_sq / self.population.dim))
+        term2 = -np.exp(sum_cos / self.population.dim)
+        result = term1 + term2 + self.population.a + math.e
+        return result
 
 #%% Multi-Stage Heuristic Algorithm
 class MSHeuristicsAlgorithm:
@@ -138,10 +163,16 @@ class MSHeuristicsAlgorithm:
 
         #generating the population until population size is reached or no time left
         while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
-            assignment = generate_assignment(self.population) #first stage
-            if assignment:
-                new_individual = Individual(assignment, self.population)
-                self.tsp_solve(new_individual) #second stage
+            if PROBLEM == "CVRP":
+                assignment = cvrp_generate_assignment(self.population) #first stage
+                if assignment:
+                    new_individual = CVRPIndividual(assignment, self.population)
+                    self.tsp_solve(new_individual) #second stage
+                    self.population.individuals.append(new_individual)
+            elif PROBLEM == "ACKLEY":
+                assignment = np.random.uniform(self.population.lower_bound, self.population.upper_bound, self.population.dim) #first stage
+                new_individual = AckleyIndividual(assignment, self.population)
+                self.local_search_optimize(new_individual) #second stage
                 self.population.individuals.append(new_individual)
 
         elapsed_end_time = time.time()
@@ -149,7 +180,8 @@ class MSHeuristicsAlgorithm:
 
         #printing the best result found
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time)
-        plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness).routes)
+        if PROBLEM == "CVRP":
+            plot_routes(self.population, min(self.population.individuals, key=lambda ind: ind.fitness).routes)
 
     #A function that order the customers in each route
     def tsp_solve(self, individual):
@@ -187,6 +219,21 @@ class MSHeuristicsAlgorithm:
         cost += np.linalg.norm(np.array(self.population.coords[current]) - np.array(self.population.depot)) #adding the cost of returning to the depot
         return ordered, cost
 
+    def local_search_optimize(self, individual):
+        best_vector = individual.vector.copy()
+        best_fitness = individual.evaluate(best_vector)
+
+        for _ in range(1000):
+            new_vector = best_vector + np.random.normal(0, 1, self.population.dim)
+            new_vector = np.clip(new_vector, self.population.lower_bound, self.population.upper_bound)
+            new_fitness = individual.evaluate(new_vector)
+            if new_fitness < best_fitness:
+                best_vector = new_vector
+                best_fitness = new_fitness
+
+        individual.vector = best_vector
+        individual.fitness = best_fitness
+
 #%% ILS Algorithm
 class ILSAlgorithm:
     def __init__(self, population):
@@ -200,9 +247,9 @@ class ILSAlgorithm:
         cpu_start_time = time.process_time()
 
         while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
-            assignment = generate_assignment(self.population)
+            assignment = cvrp_generate_assignment(self.population)
             if assignment:
-                new_ind = Individual(assignment, self.population)
+                new_ind = CVRPIndividual(assignment, self.population)
                 new_ind.evaluate()
                 self.population.individuals.append(new_ind)
 
@@ -333,7 +380,7 @@ class ILSAlgorithm:
         #add the last route if it has customers
         if curr_route:
             routes.append(curr_route)
-        new_individual = Individual(routes, self.population)
+        new_individual = CVRPIndividual(routes, self.population)
         new_individual.evaluate()
         return new_individual
     
@@ -399,9 +446,9 @@ class GAAlgorithm:
     def individual_islands_initialize(self):
         individual_idx = 0
         while individual_idx < POPULATION_SIZE:
-            assignment = generate_assignment(self.population)
+            assignment = cvrp_generate_assignment(self.population)
             if assignment:
-                new_ind = Individual(assignment, self.population)
+                new_ind = CVRPIndividual(assignment, self.population)
                 new_ind.evaluate()
                 island_idx = individual_idx % ISLANDS_COUNT
                 self.islands[island_idx].append(new_ind)
@@ -433,7 +480,7 @@ class GAAlgorithm:
             child = self.crossover(parents[0], parents[1])
             if random.random() < MUTATION_RATE:
                 child = self.mutate(child)
-            child = Individual(child, self.population)
+            child = CVRPIndividual(child, self.population)
             child.evaluate()
             next_gen.append(child)
         return sorted(next_gen, key=lambda ind: ind.fitness)
@@ -629,9 +676,9 @@ class ALNSAlgorithm:
         cpu_start_time = time.process_time()
 
         while len(self.population.individuals) < POPULATION_SIZE and time.time() - elapsed_start_time < TIME_LIMIT:
-            assignment = generate_assignment(self.population)
+            assignment = cvrp_generate_assignment(self.population)
             if assignment:
-                new_ind = Individual(assignment, self.population)
+                new_ind = CVRPIndividual(assignment, self.population)
                 new_ind.evaluate()
                 self.population.individuals.append(new_ind)
 
@@ -730,7 +777,7 @@ class BranchAndBoundAlgorithm:
         cpu_end_time = time.process_time()
 
         if self.best_solution:
-            best_ind = Individual(self.best_solution, self.population)
+            best_ind = CVRPIndividual(self.best_solution, self.population)
             best_ind.fitness = self.best_cost
             best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
             plot_routes(self.population, best_ind.routes)
@@ -749,7 +796,7 @@ class BranchAndBoundAlgorithm:
 
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
-def generate_assignment(population, max_iter = 4):
+def cvrp_generate_assignment(population, max_iter = 4):
     customers = [cid for cid in population.coords]
     random.shuffle(customers)
     customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
@@ -799,42 +846,6 @@ def generate_assignment(population, max_iter = 4):
             else:
                 return None #No valid assignment found, try failed
     return assignment
-
-#A function that order the customers in each route
-def tsp_solve(population, individual):
-    optimized = []
-    total_cost = 0
-    for route in individual.routes:
-        ordered, cost = nn_route_reorder(population, route)
-        optimized.append(ordered)
-        total_cost += cost
-    individual.routes = optimized
-    individual.fitness = total_cost
-
-#A function that reorders the route using nearest neighbor heuristic
-def nn_route_reorder(population, route):
-    if not route:
-        return [], 0
-    current, cost = min(((node, np.linalg.norm(np.array(population.coords[node]) - np.array(population.depot))) for node in route), key=lambda x: x[1])
-    ordered = [current] #initializing the route with the closest customer to the depot
-    unvisited = set(route) 
-    unvisited.remove(current)
-
-    while unvisited:
-        nearest = None
-        min_dist = float('inf')
-        for node in unvisited:
-            d = population.dist_matrix[current][node]
-            if d < min_dist:
-                min_dist = d
-                nearest = node
-        cost += min_dist
-        ordered.append(nearest) #in each iteration the nearest customer is added to the route
-        current = nearest
-        unvisited.remove(nearest)
-
-    cost += np.linalg.norm(np.array(population.coords[current]) - np.array(population.depot)) #adding the cost of returning to the depot
-    return ordered, cost
 
 #A function that finds a random neighbor of an individual
 def find_neighbor(population, individual, method = None):
@@ -891,7 +902,7 @@ def find_neighbor(population, individual, method = None):
         routes = [r[:] for r in individual.routes]
         route_idx = random.randint(0, len(routes) - 1)
         random.shuffle(routes[route_idx])
-    new_individual = Individual(routes, population)
+    new_individual = CVRPIndividual(routes, population)
     new_individual.evaluate()
     return new_individual
 
@@ -923,12 +934,18 @@ def iteration_statistics(population, iter_no):
 def best_individual(population, elapsed_time, cpu_time, best_solution = None, best_fitness = None):
     if not best_solution:
         best_ind = min(population.individuals, key=lambda ind: ind.fitness)
-        for i, route in enumerate(best_ind.routes):
-            print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+        if PROBLEM == "CVRP":
+            for i, route in enumerate(best_ind.routes):
+                print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+        elif PROBLEM == "ACKLEY":
+            print(f"{best_ind.vector}")
         print(f"Cost: {best_ind.fitness:.2f}")
     else:
-        for i, route in enumerate(best_solution):
-            print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+        if PROBLEM == "CVRP":
+            for i, route in enumerate(best_solution):
+                print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+        elif PROBLEM == "ACKLEY":
+            print(f"{best_solution}")
         print(f"Cost: {best_fitness:.2f}")
     print(f"Elapsed Time: {elapsed_time:.2f} seconds")
     print(f"CPU Time: {cpu_time:.2f} seconds")
@@ -964,7 +981,7 @@ def plot_routes(population, routes):
 
 #%% Main Function
 def main(input_file):
-    population = Population(input_file)
+    population = CVRPPopulation(input_file) if PROBLEM == "CVRP" else AckleyPopulation()
     if ALGORITHM == "MULTI_STAGE_HEURISTIC":
         solver = MSHeuristicsAlgorithm(population)
     elif ALGORITHM == "ILS":
@@ -980,9 +997,10 @@ def main(input_file):
 if __name__ == "__main__":
 
     #checking command line and its arguments validity
-    if len(sys.argv) != 3:
-        print("Usage: python cvrp_solver.py <time_limit_in_seconds> <input_file>")
+    if len(sys.argv) not in [3,4]:
+        print("Usage: python cvrp_solver.py <time_limit_in_seconds> <problem> <input_file (only for CVRP)>")
         sys.exit(1)
+
     try:
         TIME_LIMIT = int(sys.argv[1])
     except ValueError:
@@ -991,10 +1009,20 @@ if __name__ == "__main__":
     if TIME_LIMIT <= 0:
         print("Time limit must be a positive integer.")
         sys.exit(1)
-    input_file = sys.argv[2]
-    if not os.path.isfile(input_file):
-        print(f"Input file '{input_file}' does not exist.")
+
+    PROBLEM = sys.argv[2].upper()
+    if PROBLEM not in ["CVRP", "ACKLEY"]:
+        print("Problem must be either 'CVRP' or 'ACKLEY'.")
         sys.exit(1)
 
+    if PROBLEM == "CVRP":
+        if len(sys.argv) != 4:
+            print("Input file is required for CVRP problem.")
+            sys.exit(1)
+        input_file = sys.argv[3]
+        if not os.path.isfile(input_file):
+            print(f"Input file '{input_file}' does not exist.")
+            sys.exit(1)
+    else:
+        input_file = None
     main(input_file)
-
