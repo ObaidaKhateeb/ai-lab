@@ -15,7 +15,7 @@ PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
-ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
+ILS_META_HEURISTIC = "ACO" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
 ACO_EVAPORATION_RATE = 0.5
@@ -287,14 +287,19 @@ class ILSAlgorithm:
                     if neighbor.fitness < individual.fitness:
                         individual.routes = neighbor.routes
                         individual.fitness = neighbor.fitness
-                elif ILS_META_HEURISTIC == "SA":
+                elif ILS_META_HEURISTIC == "TS":
+                    if not self.tabu_list:
+                        self.tabu_hash_initiallize()
                     if PROBLEM == "CVRP":
                         neighbors = [cvrp_find_neighbor(self.population, individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
                     elif PROBLEM == "ACKLEY":
                         neighbors = [ackley_find_neighbor(self.population, individual, method) for method in ["shift_one", "shift_all", "set_random"]]
                     neighbors.sort(key=lambda ind: ind.fitness)
                     for neighbor in neighbors:
-                        neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
+                        if PROBLEM == "CVRP":
+                            neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
+                        elif PROBLEM == "ACKLEY":
+                            neighbor_hash = str(np.round(neighbor.routes, decimals=2).tolist())
                         if neighbor_hash not in self.tabu_set:
                             individual.routes = neighbor.routes
                             individual.fitness = neighbor.fitness
@@ -336,7 +341,10 @@ class ILSAlgorithm:
     #A function that initializes the tabu list and set with the hash of current population individuals
     def tabu_hash_initiallize(self):
         for ind in self.population.individuals:
-            ind_hash = str(sorted([tuple(route) for route in ind.routes]))
+            if PROBLEM == "CVRP":
+                ind_hash = str(sorted([tuple(route) for route in ind.routes]))
+            elif PROBLEM == "ACKLEY":
+                ind_hash = str(np.round(ind.routes, decimals=2).tolist())
             self.tabu_list.append(ind_hash)
             self.tabu_set.add(ind_hash)
     
