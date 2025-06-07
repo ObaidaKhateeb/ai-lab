@@ -1072,6 +1072,9 @@ if __name__ == "__main__":
     if PROBLEM not in ["CVRP", "ACKLEY"]:
         print("Problem must be either 'CVRP' or 'ACKLEY'.")
         sys.exit(1)
+    if PROBLEM == "ACKLEY" and ALGORITHM == "ILS" and ILS_META_HEURISTIC == "ACO":
+        print("ACO is not supported for ACKLEY problem.")
+        sys.exit(1)
 
     if PROBLEM == "CVRP":
         if len(sys.argv) != 4:
