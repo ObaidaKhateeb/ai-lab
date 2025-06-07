@@ -7,13 +7,12 @@ import sys
 import os
 import matplotlib.pyplot as plt
 
-
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -140,16 +139,21 @@ class AckleyPopulation:
 class AckleyIndividual:
     def __init__(self, vector, population):
         self.population = population
-        self.vector = vector
+        self.routes = vector
         self.fitness = 0
 
-    def evaluate(self, vector):
+    def evaluate(self, vector = None):
+        if vector is None:
+            vector = self.routes
         sum_sq = np.sum(vector ** 2)
         sum_cos = np.sum(np.cos(self.population.c * vector))
         term1 = -self.population.a * np.exp(-self.population.b * np.sqrt(sum_sq / self.population.dim))
         term2 = -np.exp(sum_cos / self.population.dim)
         result = term1 + term2 + self.population.a + math.e
-        return result
+        if vector is None:
+            self.routes = vector
+        else:
+            return result
 
 #%% Multi-Stage Heuristic Algorithm
 class MSHeuristicsAlgorithm:
@@ -167,6 +171,7 @@ class MSHeuristicsAlgorithm:
                 assignment = cvrp_generate_assignment(self.population) #first stage
                 if assignment:
                     new_individual = CVRPIndividual(assignment, self.population)
+                    new_individual.evaluate() 
                     self.tsp_solve(new_individual) #second stage
                     self.population.individuals.append(new_individual)
             elif PROBLEM == "ACKLEY":
@@ -220,7 +225,7 @@ class MSHeuristicsAlgorithm:
         return ordered, cost
 
     def local_search_optimize(self, individual):
-        best_vector = individual.vector.copy()
+        best_vector = individual.routes.copy()
         best_fitness = individual.evaluate(best_vector)
 
         for _ in range(1000):
@@ -231,7 +236,7 @@ class MSHeuristicsAlgorithm:
                 best_vector = new_vector
                 best_fitness = new_fitness
 
-        individual.vector = best_vector
+        individual.routes = best_vector
         individual.fitness = best_fitness
 
 #%% ILS Algorithm
@@ -247,10 +252,16 @@ class ILSAlgorithm:
         cpu_start_time = time.process_time()
 
         while time.time() - elapsed_start_time < TIME_LIMIT and len(self.population.individuals) < POPULATION_SIZE:
-            assignment = cvrp_generate_assignment(self.population)
-            if assignment:
-                new_ind = CVRPIndividual(assignment, self.population)
-                new_ind.evaluate()
+            if PROBLEM == "CVRP":    
+                assignment = cvrp_generate_assignment(self.population)
+                if assignment:
+                    new_ind = CVRPIndividual(assignment, self.population)
+                    new_ind.evaluate()
+                    self.population.individuals.append(new_ind)
+            elif PROBLEM == "ACKLEY":
+                assignment = np.random.uniform(self.population.lower_bound, self.population.upper_bound, self.population.dim)
+                new_ind = AckleyIndividual(assignment, self.population)
+                new_ind.fitness = new_ind.evaluate(new_ind.routes)
                 self.population.individuals.append(new_ind)
 
         iter_count = 0
@@ -261,24 +272,26 @@ class ILSAlgorithm:
             update_temperature()
             for i, individual in enumerate(self.population.individuals):
                 if ILS_META_HEURISTIC == "None":
-                    neighbor = find_neighbor(self.population, individual) 
+                    if PROBLEM == "CVRP":
+                        neighbor = cvrp_find_neighbor(self.population, individual) 
+                    elif PROBLEM == "ACKLEY":
+                        neighbor = ackley_find_neighbor(self.population, individual) 
                     if neighbor.fitness < individual.fitness:
                         individual.routes = neighbor.routes
                         individual.fitness = neighbor.fitness
                 elif ILS_META_HEURISTIC == "SA":
-                    neighbor = find_neighbor(self.population, individual) 
+                    if PROBLEM == "CVRP":
+                        neighbor = cvrp_find_neighbor(self.population, individual) 
+                    elif PROBLEM == "ACKLEY":
+                        neighbor = ackley_find_neighbor(self.population, individual) 
                     if neighbor.fitness < individual.fitness:
                         individual.routes = neighbor.routes
                         individual.fitness = neighbor.fitness
-                    else:
-                        toReplace = simulated_annealing(individual.fitness, neighbor.fitness)
-                        if toReplace:
-                            individual.routes = neighbor.routes
-                            individual.fitness = neighbor.fitness
-                elif ILS_META_HEURISTIC == "TS":
-                    if not self.tabu_list:
-                        self.tabu_hash_initiallize()
-                    neighbors = [find_neighbor(self.population, individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
+                elif ILS_META_HEURISTIC == "SA":
+                    if PROBLEM == "CVRP":
+                        neighbors = [cvrp_find_neighbor(self.population, individual, method) for method in ["2-opt", "relocate", "reposition", "swap", "shuffle"]]
+                    elif PROBLEM == "ACKLEY":
+                        neighbors = [ackley_find_neighbor(self.population, individual, method) for method in ["shift_one", "shift_all", "set_random"]]
                     neighbors.sort(key=lambda ind: ind.fitness)
                     for neighbor in neighbors:
                         neighbor_hash = str(sorted([tuple(route) for route in neighbor.routes]))
@@ -315,8 +328,10 @@ class ILSAlgorithm:
             
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
+
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_routes(self.population, best_solution_found)
+        if PROBLEM == "CVRP":
+            plot_routes(self.population, best_solution_found)
 
     #A function that initializes the tabu list and set with the hash of current population individuals
     def tabu_hash_initiallize(self):
@@ -412,6 +427,7 @@ class GAAlgorithm:
     def solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
+        
         self.individual_islands_initialize()
 
         best_fitness_found = float('inf')
@@ -440,7 +456,8 @@ class GAAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_routes(self.population, best_solution_found)
+        if PROBLEM == "CVRP":    
+            plot_routes(self.population, best_solution_found)
 
     # A function that initializes the individuals and the islands 
     def individual_islands_initialize(self):
@@ -691,7 +708,7 @@ class ALNSAlgorithm:
             for individual in self.population.individuals:
                 op_idx = self.select_operator()
                 self.uses[op_idx] += 1
-                new_ind = find_neighbor(self.population, individual, method=self.operators[op_idx])
+                new_ind = cvrp_find_neighbor(self.population, individual, method=self.operators[op_idx])
                 if new_ind.fitness < individual.fitness:
                     individual.routes = new_ind.routes
                     individual.fitness = new_ind.fitness
@@ -716,8 +733,10 @@ class ALNSAlgorithm:
 
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
+        
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_routes(self.population, best_solution_found)
+        if PROBLEM == "CVRP":
+            plot_routes(self.population, best_solution_found)
 
     # A function that selects an operator, using a weighted random choice
     def select_operator(self):
@@ -848,7 +867,7 @@ def cvrp_generate_assignment(population, max_iter = 4):
     return assignment
 
 #A function that finds a random neighbor of an individual
-def find_neighbor(population, individual, method = None):
+def cvrp_find_neighbor(population, individual, method = None):
     if not method:
         neighborhood_methods = ["2-opt", "relocate", "reposition", "swap", "shuffle"]
         method = random.choice(neighborhood_methods)
@@ -906,6 +925,33 @@ def find_neighbor(population, individual, method = None):
     new_individual.evaluate()
     return new_individual
 
+def ackley_find_neighbor(population, individual, method=None):
+    if not method:
+        neighborhood_methods = ["shift_one", "shift_all", "set_random"]
+        method = random.choice(neighborhood_methods)
+    new_vector = individual.routes.copy()
+
+    if method == "shift_one": #shifting one dimensions value by adding a small noise 
+        i = random.randint(0, population.dim - 1)
+        delta = np.random.uniform(-0.1, 0.1) 
+        new_vector[i] += delta
+        new_vector[i] = np.clip(new_vector[i], population.lower_bound, population.upper_bound)
+    
+    elif method == "shift_all": #shifting all dimensions values by adding a small uniform noise
+        noise = np.random.uniform(-0.05, 0.05, population.dim)
+        new_vector += noise
+        new_vector = np.clip(new_vector, population.lower_bound, population.upper_bound)
+    
+    elif method == "set_random": #changing one dimensions value by a new random value
+        i = random.randint(0, population.dim - 1)
+        new_vector[i] = np.random.uniform(population.lower_bound, population.upper_bound)
+    
+    #Creating a new individual with the modified vector
+    new_individual = AckleyIndividual(new_vector, population)
+    new_individual.routes = new_vector
+    new_individual.fitness = new_individual.evaluate(new_vector)
+    return new_individual
+
 #A function that uses simulated annealing mechanism to decide whether to accept a neighbor solution or not
 def simulated_annealing(individual_fitness, neighbor_fitness):
     delta = neighbor_fitness - individual_fitness
@@ -925,20 +971,24 @@ def iteration_statistics(population, iter_no):
     population.best_fitness.append(best_ind.fitness)
     population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
     print(f"Iteration {iter_no} Best:", end=' ')
-    routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind.routes]
-    print(' '.join(routes_str), end=' ')
+    if PROBLEM == "CVRP":
+        routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind.routes]
+        print(' '.join(routes_str), end=' ')
+    elif PROBLEM == "ACKLEY":
+        routes_str = best_ind.routes
+        print(f"{routes_str}", end=' ')
     print(f"({int(best_ind.fitness)})")
     print("")
 
 #A function that prints the best solution found after the algorithm finishes
 def best_individual(population, elapsed_time, cpu_time, best_solution = None, best_fitness = None):
-    if not best_solution:
+    if best_solution is None:
         best_ind = min(population.individuals, key=lambda ind: ind.fitness)
         if PROBLEM == "CVRP":
             for i, route in enumerate(best_ind.routes):
                 print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
         elif PROBLEM == "ACKLEY":
-            print(f"{best_ind.vector}")
+            print(f"{best_ind.routes}")
         print(f"Cost: {best_ind.fitness:.2f}")
     else:
         if PROBLEM == "CVRP":
