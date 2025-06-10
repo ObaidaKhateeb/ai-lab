@@ -9,15 +9,15 @@ import matplotlib.pyplot as plt
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
-LOCAL_OPTIMUM_THRESHOLD = 50
+LOCAL_OPTIMUM_THRESHOLD = 500
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
-ILS_META_HEURISTIC = "SA" # (None, SA, TS, ACO)
-CURRENT_TEMPERATURE = 500
-COOLING_RATE = 0.9
+ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
+CURRENT_TEMPERATURE = 5
+COOLING_RATE = 0.93
 ACO_EVAPORATION_RATE = 0.5
 ACO_Q = 100
 ACO_ALPHA = 1.0
@@ -915,7 +915,7 @@ def cvrp_generate_assignment(population, max_iter = 4):
 
             #the case where the customer is closest to the depot than other centroids and there's available vehicle            
             if len(assignment) < population.trucks_count:
-                dist_from_depot = np.linalg.norm(customer_coords[cid] - np.array(population.depot))
+                dist_from_depot = 2 * (np.linalg.norm(customer_coords[cid] - np.array(population.depot)))
                 if dist_from_depot < min_dist:
                     assignment.append([cid]) 
                     loads.append(customer_demands[cid])
@@ -1130,9 +1130,12 @@ if __name__ == "__main__":
     if PROBLEM not in ["CVRP", "ACKLEY"]:
         print("Problem must be either 'CVRP' or 'ACKLEY'.")
         sys.exit(1)
-    if PROBLEM == "ACKLEY" and ALGORITHM == "ILS" and ILS_META_HEURISTIC == "ACO":
-        print("ACO is not supported for ACKLEY problem.")
-        sys.exit(1)
+    if PROBLEM == "ACKLEY":
+        if ALGORITHM == "ILS" and ILS_META_HEURISTIC == "ACO":
+            print("ACO is not supported for ACKLEY problem.")
+            sys.exit(1)
+        CURRENT_TEMPERATURE = 1
+        COOLING_RATE = 0.95
 
     if PROBLEM == "CVRP":
         if len(sys.argv) != 4:
