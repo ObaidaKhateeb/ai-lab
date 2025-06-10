@@ -12,10 +12,10 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
-ILS_META_HEURISTIC = "ACO" # (None, SA, TS, ACO)
+ILS_META_HEURISTIC = "SA" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 500
 COOLING_RATE = 0.9
 ACO_EVAPORATION_RATE = 0.5
@@ -29,8 +29,8 @@ ISLANDS_COUNT = 4
 MIGRATION_INTERVAL = 10
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
-CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER)
-MUTATION_TYPE = "scramble" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
+CROSSOVER_TYPE = "uniform" # (OX, PMX, CX, ER, arithmetic, uniform)
+MUTATION_TYPE = "inversion" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
 class CVRPPopulation:
@@ -142,16 +142,18 @@ class AckleyIndividual:
         self.routes = vector
         self.fitness = 0
 
-    def evaluate(self, vector = None):
-        if vector is None:
+    def evaluate(self, input_vector = None):
+        if input_vector is None:
             vector = self.routes
+        else:
+            vector = input_vector
         sum_sq = np.sum(vector ** 2)
         sum_cos = np.sum(np.cos(self.population.c * vector))
         term1 = -self.population.a * np.exp(-self.population.b * np.sqrt(sum_sq / self.population.dim))
         term2 = -np.exp(sum_cos / self.population.dim)
         result = term1 + term2 + self.population.a + math.e
-        if vector is None:
-            self.routes = vector
+        if input_vector is None:
+            self.fitness = result
         else:
             return result
 
@@ -287,6 +289,11 @@ class ILSAlgorithm:
                     if neighbor.fitness < individual.fitness:
                         individual.routes = neighbor.routes
                         individual.fitness = neighbor.fitness
+                    else:
+                        toReplace = simulated_annealing(individual.fitness, neighbor.fitness)
+                        if toReplace:
+                            individual.routes = neighbor.routes
+                            individual.fitness = neighbor.fitness
                 elif ILS_META_HEURISTIC == "TS":
                     if not self.tabu_list:
                         self.tabu_hash_initiallize()
@@ -305,7 +312,7 @@ class ILSAlgorithm:
                             individual.fitness = neighbor.fitness
                             self.tabu_list.append(neighbor_hash)
                             self.tabu_set.add(neighbor_hash)
-                            if len(self.tabu_list) > POPULATION_SIZE * 10:
+                            if len(self.tabu_list) > POPULATION_SIZE * 3.5:
                                 oldest = self.tabu_list.pop(0)
                                 self.tabu_set.discard(oldest)
                             break
@@ -435,7 +442,6 @@ class GAAlgorithm:
     def solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
-        
         self.individual_islands_initialize()
 
         best_fitness_found = float('inf')
@@ -444,9 +450,9 @@ class GAAlgorithm:
         while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
             for i in range(ISLANDS_COUNT):
                 self.islands[i] = self.evolve_island(self.islands[i])
+            self.generation += 1
             if self.generation % MIGRATION_INTERVAL == 0:
                 self.migrate()
-            self.generation += 1
 
             self.population.individuals = [ind for island in self.islands for ind in island]
 
@@ -471,9 +477,15 @@ class GAAlgorithm:
     def individual_islands_initialize(self):
         individual_idx = 0
         while individual_idx < POPULATION_SIZE:
-            assignment = cvrp_generate_assignment(self.population)
-            if assignment:
-                new_ind = CVRPIndividual(assignment, self.population)
+            if PROBLEM == "CVRP":
+                assignment = cvrp_generate_assignment(self.population)
+                if assignment is not None:
+                    new_ind = CVRPIndividual(assignment, self.population)
+            elif PROBLEM == "ACKLEY":
+                assignment = np.random.uniform(self.population.lower_bound, self.population.upper_bound, self.population.dim)
+                if assignment is not None:
+                    new_ind = AckleyIndividual(assignment, self.population)
+            if assignment is not None:
                 new_ind.evaluate()
                 island_idx = individual_idx % ISLANDS_COUNT
                 self.islands[island_idx].append(new_ind)
@@ -486,10 +498,10 @@ class GAAlgorithm:
             migrants_num = int(len(island) * MIGRATION_RATE * 0.5)
             self.islands[i].sort(key=lambda ind: ind.fitness)
             island_best_migrants = island[:migrants_num] #choose migrants out of the best
-            rest_of_island = self.islands[i][migrants_num:]
-            self.islands[i] = self.islands[i][:len(island) - migrants_num * 2] #remove the worst individuals from the island
-            random.shuffle(rest_of_island)
-            island_random_migrants = rest_of_island[:migrants_num] #choose random migrants
+            self.islands[i] = self.islands[i][migrants_num:] #remove the best individuals from the island
+            random.shuffle(self.islands[i])
+            island_random_migrants = self.islands[i][:migrants_num] #choose random migrants
+            self.islands[i] = self.islands[i][migrants_num:] #remove the random individuals from the island
             migrants.append(island_random_migrants + island_best_migrants)
 
         for i in range(ISLANDS_COUNT):
@@ -505,15 +517,20 @@ class GAAlgorithm:
             child = self.crossover(parents[0], parents[1])
             if random.random() < MUTATION_RATE:
                 child = self.mutate(child)
-            child = CVRPIndividual(child, self.population)
+            child = CVRPIndividual(child, self.population) if PROBLEM == "CVRP" else AckleyIndividual(child, self.population)
             child.evaluate()
             next_gen.append(child)
         return sorted(next_gen, key=lambda ind: ind.fitness)
 
     # A function that performs crossover between two parents
     def crossover(self, parent1, parent2):
-        genome1 = self.routes_to_permutation(parent1.routes)
-        genome2 = self.routes_to_permutation(parent2.routes)
+        if PROBLEM == "CVRP":
+            genome1 = self.routes_to_permutation(parent1.routes)
+            genome2 = self.routes_to_permutation(parent2.routes)
+        elif PROBLEM == "ACKLEY":
+            genome1 = parent1.routes
+            genome2 = parent2.routes
+
         if CROSSOVER_TYPE == "PMX":
             child = self.pmx_crossover(genome1, genome2)
         elif CROSSOVER_TYPE == "OX":
@@ -522,8 +539,15 @@ class GAAlgorithm:
             child = self.cx_crossover(genome1, genome2)
         elif CROSSOVER_TYPE == "ER":
             child = self.er_crossover(genome1, genome2)
+        elif CROSSOVER_TYPE == "arithmetic":
+            child = self.arithmetic_crossover(genome1, genome2)
+        elif CROSSOVER_TYPE == "uniform":
+            child = self.uniform_crossover(genome1, genome2)
 
-        return self.permutation_to_routes(child)
+        if PROBLEM == "CVRP":
+            return self.permutation_to_routes(child)
+        elif PROBLEM == "ACKLEY":
+            return child
 
     def pmx_crossover(self, p1, p2):
         size = len(p1)
@@ -542,8 +566,13 @@ class GAAlgorithm:
         size = len(p1)
         a, b = sorted(random.sample(range(size), 2))
         middle = p1[a:b]
-        remaining = [item for item in p2 if item not in middle]
-        return remaining[:a] + middle + remaining[a:]
+        if PROBLEM == "CVRP":
+            remaining = [item for item in p2 if item not in middle]
+            return remaining[:a] + middle + remaining[a:]
+        elif PROBLEM == "ACKLEY":
+            child = p2.copy()
+            child[a:b] = middle
+            return child
 
     def cx_crossover(self, p1, p2):
         size = len(p1)
@@ -598,22 +627,49 @@ class GAAlgorithm:
             current = next_city
         return (child)
 
+    # A function that performs arithmetic crossover, used for Ackley problem
+    def arithmetic_crossover(self, p1, p2):
+        lower_bound = -32.768
+        upper_bound = 32.768
+        alpha = random.random()
+        child = alpha * p1 + (1 - alpha) * p2
+        child = np.clip(child, lower_bound, upper_bound)
+        return child
+    
+    # A function that performs uniform crossover, used for Ackley problem
+    def uniform_crossover(self, p1, p2):
+        lower_bound = -32.768
+        upper_bound = 32.768
+        mask = np.random.rand(len(p1)) < 0.5
+        child_vector = np.where(mask, p1, p2)
+        child = np.clip(child_vector, lower_bound, upper_bound)
+        return child
+
+
     #A function that mutates the individual
     def mutate(self, individual):
-        individual_genome = self.routes_to_permutation(individual)
+        if PROBLEM == "CVRP":
+            individual_genome = self.routes_to_permutation(individual)
+        elif PROBLEM == "ACKLEY":
+            individual_genome = individual.tolist() 
         if MUTATION_TYPE == "displacement":
-            self.displacement_mutate(individual_genome)
+            individual_genome = self.displacement_mutate(individual_genome)
         elif MUTATION_TYPE == "swap":
-            self.swap_mutate(individual_genome)
+            individual_genome =self.swap_mutate(individual_genome)
         elif MUTATION_TYPE == "insertion":
-            self.insertion_mutate(individual_genome)
+            individual_genome = self.insertion_mutate(individual_genome)
         elif MUTATION_TYPE == "simple_inversion":
-            self.simple_inversion_mutate(individual_genome)
+            individual_genome = self.simple_inversion_mutate(individual_genome)
         elif MUTATION_TYPE == "inversion":
-            self.inversion_mutate(individual_genome)
+            individual_genome = self.inversion_mutate(individual_genome)
         elif MUTATION_TYPE == "scramble":
-            self.scramble_mutate(individual_genome)
-        return self.permutation_to_routes(individual_genome)
+            individual_genome = self.scramble_mutate(individual_genome)
+
+        if PROBLEM == "CVRP":
+            return self.permutation_to_routes(individual_genome)
+        elif PROBLEM == "ACKLEY":
+            return np.array(individual_genome)
+
 
     def displacement_mutate(self, genome):
         i, j = random.sample(range(len(genome)), 2)
@@ -643,6 +699,7 @@ class GAAlgorithm:
         segment = genome[i:j + 1]
         segment.reverse()
         genome = genome[:i] + segment + genome[j + 1:]
+        return genome
 
     def inversion_mutate(self, genome):
         i, j = random.sample(range(len(genome)), 2)
@@ -653,6 +710,7 @@ class GAAlgorithm:
         remainder = genome[:i] + genome[j + 1:]
         insertion_place = random.randint(0, len(remainder))
         genome = remainder[:insertion_place] + segment + remainder[insertion_place:]
+        return genome
 
     def scramble_mutate(self, genome):
         i, j = random.sample(range(len(genome)), 2)
@@ -915,7 +973,7 @@ def cvrp_find_neighbor(population, individual, method = None):
         if new_idx > curr_idx:
             new_idx -= 1
         route.insert(new_idx, customer)
-    elif method == "swap":
+    elif method == "swap": #swapping two random customers between two random routes
         if len(routes) < 2: #not enough routes for reposition
             return individual
         r1, r2 = random.sample(range(len(routes)), 2)
@@ -1056,7 +1114,7 @@ if __name__ == "__main__":
 
     #checking command line and its arguments validity
     if len(sys.argv) not in [3,4]:
-        print("Usage: python cvrp_solver.py <time_limit_in_seconds> <problem> <input_file (only for CVRP)>")
+        print("Usage: python cvrp_solver.py <time_limit> <problem> <input_file (only for CVRP)>")
         sys.exit(1)
 
     try:
