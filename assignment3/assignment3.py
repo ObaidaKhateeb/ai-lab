@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
-LOCAL_OPTIMUM_THRESHOLD = 500
+LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "ILS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -24,13 +24,14 @@ ACO_ALPHA = 1.0
 ACO_BETA = 2.0
 
 # GA Parameters
+PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM" # (TOP_HALF_UNIFORM, RWS)
 MIGRATION_RATE = 0.1
 ISLANDS_COUNT = 4
 MIGRATION_INTERVAL = 10
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
-CROSSOVER_TYPE = "uniform" # (OX, PMX, CX, ER, arithmetic, uniform)
-MUTATION_TYPE = "inversion" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
+CROSSOVER_TYPE = "CX" # (OX, PMX, CX, ER, arithmetic, uniform)
+MUTATION_TYPE = "swap" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
 class CVRPPopulation:
@@ -513,14 +514,58 @@ class GAAlgorithm:
     def evolve_island(self, island):
         next_gen = sorted(island, key=lambda ind: ind.fitness)[:int(ELITISM_RATE * len(island))] #keep the elite for the next generation
         while len(next_gen) < len(island):
-            parents = random.sample(island, 2)
-            child = self.crossover(parents[0], parents[1])
+            _, p1 = self.select_parents(island)
+            _, p2 = self.select_parents(island)
+            child = self.crossover(p1, p2)
+            if not child:
+                continue
             if random.random() < MUTATION_RATE:
                 child = self.mutate(child)
+            if not child:
+                continue
             child = CVRPIndividual(child, self.population) if PROBLEM == "CVRP" else AckleyIndividual(child, self.population)
             child.evaluate()
             next_gen.append(child)
         return sorted(next_gen, key=lambda ind: ind.fitness)
+
+    def select_parents(self, island):
+        if PARENT_SELECTION_METHOD == "TOP_HALF_UNIFORM":
+            return self.top_half_uniform_selection(island)
+        elif PARENT_SELECTION_METHOD == "RWS":
+            return self.rws_selection(island)
+
+    #A function that selects a parent using Top Half Uniform
+    def top_half_uniform_selection(self, island):
+        rand = random.randint(0, len(island) // 2 - 1)
+        return rand, island[rand]
+
+    #A function that selects a parent using RWS
+    def rws_selection(self, island):
+
+        #Scaling the fitness values using linear scaling
+        max_fitness = max(ind.fitness for ind in island)
+        scaled_fitnesses = self.linear_scaling(island, -1, max_fitness)
+
+        #Converting fitness values to probabilities
+        total_scaled = sum(scaled_fitnesses)
+        selection_probs = [fit / total_scaled for fit in scaled_fitnesses]
+        if total_scaled == 0:
+            random_choice = random.randint(0, len(island) - 1)
+            return random_choice, island[random_choice]
+
+        #Building the "roulete"
+        cumulative_probs = []
+        cumsum = 0
+        for prob in selection_probs:
+            cumsum += prob
+            cumulative_probs.append(cumsum)
+
+        #Selecting a random individual
+        pick = random.random()
+        for i, prob in enumerate(cumulative_probs):
+            if pick < prob:
+                return i, island[i]
+        return len(island) - 1, island[-1]
 
     # A function that performs crossover between two parents
     def crossover(self, parent1, parent2):
@@ -666,7 +711,11 @@ class GAAlgorithm:
             individual_genome = self.scramble_mutate(individual_genome)
 
         if PROBLEM == "CVRP":
-            return self.permutation_to_routes(individual_genome)
+            ind_genome = self.permutation_to_routes(individual_genome)
+            if ind_genome is None:
+                return None
+            else:
+                return self.permutation_to_routes(individual_genome)
         elif PROBLEM == "ACKLEY":
             return np.array(individual_genome)
 
@@ -727,23 +776,42 @@ class GAAlgorithm:
         for route in individual:
             permutation.extend(route)
         return permutation
-
+        
     #A function that converts permutation representation to routes
-    def permutation_to_routes(self, permutation):
+    def permutation_to_routes(self, permutation, try_count = 0):
         routes = []
-        current_route = []
-        demand = 0
-        for cid in permutation:
+        current_route = [permutation[0]]
+        demand = self.population.demands[permutation[0]]
+        for cid in permutation[1:]:
             if demand + self.population.demands[cid] > self.population.truck_capacity:
+                if len(routes) > self.population.trucks_count:
+                    return None
                 routes.append(current_route)
                 current_route = [cid]
                 demand = self.population.demands[cid]
             else:
+                if len(routes) < self.population.trucks_count:
+                    if (2* (np.linalg.norm(np.array(self.population.coords[cid]) - np.array(self.population.depot)))) < np.linalg.norm(np.array(self.population.coords[current_route[-1]]) - np.array(self.population.depot)):
+                        routes.append(current_route)
+                        current_route = [cid]
+                        demand = self.population.demands[cid]
+                        continue
                 current_route.append(cid)
                 demand += self.population.demands[cid]
         if current_route:
             routes.append(current_route)
         return routes
+
+    def initiate_random_permutate(self):
+        permutation = list(self.population.coords.keys())
+        random.shuffle(permutation)
+        return self.permutation_to_routes(permutation)
+
+    #A function that linearly scales the fitness values
+    def linear_scaling(self, individuals, a, b):
+        scaled_fitness = [a * ind.fitness + b for ind in individuals]
+        return scaled_fitness
+
 
 #%% ALNS Algorithm
 class ALNSAlgorithm:
