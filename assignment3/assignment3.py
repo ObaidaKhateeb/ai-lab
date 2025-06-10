@@ -24,13 +24,15 @@ ACO_ALPHA = 1.0
 ACO_BETA = 2.0
 
 # GA Parameters
-PARENT_SELECTION_METHOD = "TOP_HALF_UNIFORM" # (TOP_HALF_UNIFORM, RWS)
+PARENT_SELECTION_METHOD = "TOURNAMENT_DET" # (TOP_HALF_UNIFORM, RWS, TOURNAMENT_DET, TOURNAMENT_STOCH)
+TOURNAMENT_K = 15
+TOURNAMENT_P = 0.86
 MIGRATION_RATE = 0.1
 ISLANDS_COUNT = 4
 MIGRATION_INTERVAL = 10
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
-CROSSOVER_TYPE = "CX" # (OX, PMX, CX, ER, arithmetic, uniform)
+CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER, arithmetic, uniform)
 MUTATION_TYPE = "swap" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
@@ -112,6 +114,7 @@ class CVRPIndividual:
         self.routes = routes
         self.fitness = 0
         self.population = population
+        self.rank = None
 
     # A function that evaluates the fitness of the individual as the total distance of all routes
     def evaluate(self):
@@ -142,6 +145,7 @@ class AckleyIndividual:
         self.population = population
         self.routes = vector
         self.fitness = 0
+        self.rank = None
 
     def evaluate(self, input_vector = None):
         if input_vector is None:
@@ -517,11 +521,11 @@ class GAAlgorithm:
             _, p1 = self.select_parents(island)
             _, p2 = self.select_parents(island)
             child = self.crossover(p1, p2)
-            if not child:
+            if child is None: #if crossover failed
                 continue
             if random.random() < MUTATION_RATE:
                 child = self.mutate(child)
-            if not child:
+            if child is None: #if mutation failed
                 continue
             child = CVRPIndividual(child, self.population) if PROBLEM == "CVRP" else AckleyIndividual(child, self.population)
             child.evaluate()
@@ -533,6 +537,12 @@ class GAAlgorithm:
             return self.top_half_uniform_selection(island)
         elif PARENT_SELECTION_METHOD == "RWS":
             return self.rws_selection(island)
+        elif PARENT_SELECTION_METHOD == "TOURNAMENT_DET":
+            self.fitness_ranking(island)
+            return self.tournament_selection_deter(island)
+        elif PARENT_SELECTION_METHOD == "TOURNAMENT_STOCH":
+            self.fitness_ranking(island)
+            return self.tournament_selection_stoch(island)
 
     #A function that selects a parent using Top Half Uniform
     def top_half_uniform_selection(self, island):
@@ -566,6 +576,23 @@ class GAAlgorithm:
             if pick < prob:
                 return i, island[i]
         return len(island) - 1, island[-1]
+
+    #A function that selects a parent using Deterministic Tournament Selection
+    def tournament_selection_deter(self, island):
+        k = min(TOURNAMENT_K, len(island))
+        tournament = random.sample(range(len(island)), k) #choosing K random indices
+        tournament.sort(key=lambda ind: island[ind].rank) #sorting the corresponding individuals
+        return tournament[0], island[tournament[0]]
+
+    #A function that selects a parent using Stochastic Tournament Selection
+    def tournament_selection_stoch(self, island):
+        k = min(TOURNAMENT_K, len(island))
+        tournament = random.sample(range(len(island)), k) #choosing K random indices
+        tournament.sort(key=lambda ind: island[ind].rank) #sorting the corresponding individuals
+        for i in range(TOURNAMENT_K):
+            if random.random() < TOURNAMENT_P:
+                return tournament[i], island[tournament[i]]
+        return tournament[-1], island[tournament[-1]]
 
     # A function that performs crossover between two parents
     def crossover(self, parent1, parent2):
@@ -811,6 +838,11 @@ class GAAlgorithm:
     def linear_scaling(self, individuals, a, b):
         scaled_fitness = [a * ind.fitness + b for ind in individuals]
         return scaled_fitness
+
+    def fitness_ranking(self, island):
+        sorted_inds = sorted(island, key=lambda ind: ind.fitness)
+        for rank, ind in enumerate(sorted_inds):
+            ind.rank = rank + 1
 
 
 #%% ALNS Algorithm
