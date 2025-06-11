@@ -18,8 +18,8 @@ ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 5
 COOLING_RATE = 0.93
-ACO_EVAPORATION_RATE = 0.5
-ACO_Q = 100
+ACO_EVAPORATION_RATE = 0.7
+ACO_Q = 150
 ACO_ALPHA = 1.0
 ACO_BETA = 2.0
 
@@ -1236,6 +1236,10 @@ if __name__ == "__main__":
             sys.exit(1)
         CURRENT_TEMPERATURE = 1
         COOLING_RATE = 0.95
+        CROSSOVER_TYPE = "arithmetic"
+        MUTATION_TYPE = "simple_inversion"
+        MIGRATION_RATE = 0.1
+        MIGRATION_INTERVAL = 30
 
     if PROBLEM == "CVRP":
         if len(sys.argv) != 4:
