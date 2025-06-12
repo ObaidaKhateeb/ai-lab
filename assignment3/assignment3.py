@@ -984,11 +984,12 @@ class BranchAndBoundAlgorithm:
                 continue
 
             # Adaptive subdivisions: higher early, lower later
-            subdivisions = 10 #max(8, 14 - var_idx)
+            subdivisions = 100 #max(8, 14 - var_idx)
             step = (upper_bound - lower_bound) / subdivisions
 
             for i in range(subdivisions + 1):
-                xi = lower_bound + i * step
+                # generate it randomly from the subdivision
+                xi = random.uniform(lower_bound + i * step, lower_bound + (i + 1) * step) #lower_bound + i * step
                 new_vector = vector_so_far + [xi]
 
                 # Lower bound estimate: current partial vector padded with 0
