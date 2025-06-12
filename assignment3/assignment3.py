@@ -6,13 +6,16 @@ import time
 import sys
 import os
 import matplotlib.pyplot as plt
+from queue import PriorityQueue
+import re
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 100
+MAX_ITERATIONS = 10000
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -27,9 +30,9 @@ ACO_BETA = 2.0
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET" # (TOP_HALF_UNIFORM, RWS, TOURNAMENT_DET, TOURNAMENT_STOCH)
 TOURNAMENT_K = 15
 TOURNAMENT_P = 0.86
-MIGRATION_RATE = 0.1
+MIGRATION_RATE = 0.05
 ISLANDS_COUNT = 4
-MIGRATION_INTERVAL = 10
+MIGRATION_INTERVAL = 25
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
 CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER, arithmetic, uniform)
@@ -58,6 +61,8 @@ class CVRPPopulation:
             section = None
             depot_idx = None
             customer_idx = 1
+            if re.search(r'n(\d+)-k(\d+)', lines[0]): 
+                self.trucks_count = int(re.search(r'n(\d+)-k(\d+)', lines[0]).group(2))
             for i, line in enumerate(lines):
                 line = line.strip()
                 if line.startswith("CAPACITY"): #the truck capacity
@@ -94,6 +99,7 @@ class CVRPPopulation:
                     else:
                         self.demands[customer_idx] = int(parts[1])
                         customer_idx += 1
+
             if not self.truck_capacity or not self.trucks_count or not self.coords or not self.demands:
                 raise ValueError("The file is not of the correct format or it missing data.")
         except Exception as e:
@@ -275,7 +281,7 @@ class ILSAlgorithm:
         no_improvement_count = 0
         best_fitness_found = float('inf')
         best_solution_found = None
-        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD and iter_count < MAX_ITERATIONS:
             update_temperature()
             for i, individual in enumerate(self.population.individuals):
                 if ILS_META_HEURISTIC == "None":
@@ -347,6 +353,7 @@ class ILSAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
+        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":
             plot_routes(self.population, best_solution_found)
 
@@ -452,7 +459,7 @@ class GAAlgorithm:
         best_fitness_found = float('inf')
         best_solution_found = None
         no_improvement_count = 0
-        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD and self.generation < MAX_ITERATIONS:
             for i in range(ISLANDS_COUNT):
                 self.islands[i] = self.evolve_island(self.islands[i])
             self.generation += 1
@@ -475,6 +482,7 @@ class GAAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
+        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":    
             plot_routes(self.population, best_solution_found)
 
@@ -875,7 +883,7 @@ class ALNSAlgorithm:
         best_solution_found = None
         no_improvement_count = 0
         iter_count = 0
-        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD:
+        while time.time() - elapsed_start_time < TIME_LIMIT and no_improvement_count < LOCAL_OPTIMUM_THRESHOLD and iter_count < MAX_ITERATIONS:
             update_temperature()
             for individual in self.population.individuals:
                 op_idx = self.select_operator()
@@ -910,6 +918,7 @@ class ALNSAlgorithm:
         cpu_end_time = time.process_time()
         
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
+        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":
             plot_routes(self.population, best_solution_found)
 
@@ -929,8 +938,6 @@ class ALNSAlgorithm:
     def update_weights(self):
         for i in range(len(self.operator_weights)):
             self.operator_weights[i] = (0.8 * self.operator_weights[i]) + (0.2 * (self.scores[i] / self.uses[i]))
-
-from queue import PriorityQueue
 
 
 #%% Branch and Bound Algorithm for CVRP
@@ -958,69 +965,55 @@ class BranchAndBoundAlgorithm:
 
         dummy_individual = AckleyIndividual(np.zeros(dim), self.population)
 
-        # Initialize population best_fitness and avg_fitness tracking
-        self.population.best_fitness = []
-        self.population.avg_fitness = []
-
-        # Initialize search queue
-        initial_state = (0, [], 0)  # (bound, vector_so_far, variable_index)
+        #Initialize the priority queue 
+        initial_state = (0, [], 0)  #(bound, vector_so_far, variable_index)
         queue = PriorityQueue()
         queue.put(initial_state)
-
-        iteration = 0
-        report_interval = 50000  # print progress every N nodes
 
         while not queue.empty() and time.time() - elapsed_start_time < TIME_LIMIT:
             bound, vector_so_far, var_idx = queue.get()
             self.nodes_processed += 1
 
-            # If full vector assigned → evaluate it
+            #If the vector is full, evaluate it 
             if var_idx == dim:
                 vector = np.array(vector_so_far)
                 fitness = dummy_individual.evaluate(vector)
-                if fitness < self.best_cost:
+                if fitness < self.best_cost: #if it better than the current best update the best
                     self.best_cost = fitness
                     self.best_solution = vector.copy()
                 continue
 
-            # Adaptive subdivisions: higher early, lower later
-            subdivisions = 100 #max(8, 14 - var_idx)
+            
+            subdivisions = 100
             step = (upper_bound - lower_bound) / subdivisions
 
             for i in range(subdivisions + 1):
-                # generate it randomly from the subdivision
-                xi = random.uniform(lower_bound + i * step, lower_bound + (i + 1) * step) #lower_bound + i * step
+
+                #generate the next dimensions value randomly from the subdivision
+                xi = random.uniform(lower_bound + i * step, lower_bound + (i + 1) * step) 
                 new_vector = vector_so_far + [xi]
 
-                # Lower bound estimate: current partial vector padded with 0
+                #lower bound estimate: current partial vector padded with 0
                 partial_vector = np.array(new_vector + [0] * (dim - len(new_vector)))
                 partial_cost = dummy_individual.evaluate(partial_vector)
 
-                # Prune if not promising
+                #Prune it if it's not promising
                 if partial_cost < self.best_cost:
                     queue.put((partial_cost, new_vector, var_idx + 1))
-
-            # Report progress every N nodes
-            if self.nodes_processed % report_interval == 0:
-                # Update tracking arrays (like other algorithms)
-                self.population.best_fitness.append(self.best_cost)
-                avg_fitness = np.mean([self.best_cost])  # single value here
-                self.population.avg_fitness.append(avg_fitness)
-                iteration_statistics(self.population, iteration)
-                iteration += 1
 
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
 
-        # Final report using your framework's function
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, self.best_solution, self.best_cost)
+        if PROBLEM == "CVRP":
+            plot_routes(self.population, self.best_solution)
 
     def cvrp_solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
 
         customers = list(self.population.coords.keys())
-        customers.sort(key=lambda cid: np.linalg.norm(np.array(self.population.coords[cid]) - np.array(self.population.depot)))
+        customers.sort(key=lambda cid: np.linalg.norm(np.array(self.population.coords[cid]) - np.array(self.population.depot))) #the sorting meant to take the nearest remained city to the depot each time a new route is started
         initial_state = (0, [], customers, 0, [])  #(priority, current_route, remaining_customers, current_cost, all_routes)
 
         queue = PriorityQueue()
@@ -1033,7 +1026,7 @@ class BranchAndBoundAlgorithm:
             if not remaining:
                 total_routes = all_routes + [route] if route else all_routes
                 total_cost = sum(self.estimate_cost(route) for route in total_routes)
-                if total_cost < self.best_cost:
+                if total_cost < self.best_cost: #if it's better than the currently best, replace it 
                     self.best_cost = total_cost
                     self.best_solution = total_routes
                     print(f"New Best Solution Found:")
@@ -1045,8 +1038,8 @@ class BranchAndBoundAlgorithm:
 
             if route:
                 last_customer = route[-1]
-                candidates = [c for c in self.k_nearest_neighbors[last_customer] if c in remaining]
-                if not candidates:
+                candidates = [c for c in self.k_nearest_neighbors[last_customer] if c in remaining] #candidates are the k nearest cities
+                if not candidates: #if the k nearest cities already assigned take into account all the other cities 
                     candidates = remaining
             else:
                 candidates = remaining
@@ -1061,14 +1054,14 @@ class BranchAndBoundAlgorithm:
                     partial_routes = all_routes.copy()
                     partial_cost = cost
                     lower_bound = partial_cost + self.estimate_cost(new_route) + self.mst_estimate(new_remaining)
-                    if lower_bound < self.best_cost:
+                    if lower_bound < self.best_cost: #if the state is promising insert it into queue
                         queue.put((lower_bound, new_route, new_remaining, partial_cost, partial_routes))
                 else: #start a new route if the current one exceeds the capacity
                     if route:
                         partial_routes = all_routes + [route]
                         partial_cost = cost + self.estimate_cost(route)
                         lower_bound = partial_cost + self.estimate_cost([customer]) + self.mst_estimate(new_remaining)
-                        if lower_bound < self.best_cost:
+                        if lower_bound < self.best_cost: #if the state is promising insert it into queue
                             queue.put((lower_bound, [customer], new_remaining, partial_cost, partial_routes))
 
         elapsed_end_time = time.time()
@@ -1080,6 +1073,7 @@ class BranchAndBoundAlgorithm:
             best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
             plot_routes(self.population, best_ind.routes)
 
+    # A function that computes the k nearest neighbors for each customer
     def compute_k_nearest_neighbors(self, k=3):
         neighbors = {}
         all_customers = list(self.population.coords.keys())
@@ -1093,6 +1087,7 @@ class BranchAndBoundAlgorithm:
             neighbors[i] = [j for _, j in distances[:k]]
         return neighbors
 
+    #A function that estimates the cost of a given route
     def estimate_cost(self, route):
         if not route:
             return 0
@@ -1126,10 +1121,9 @@ class BranchAndBoundAlgorithm:
         return total
 
 
-
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
-def cvrp_generate_assignment(population, max_iter = 4):
+def cvrp_generate_assignment(population, max_iter = 4, try_count = 0):
     customers = [cid for cid in population.coords]
     random.shuffle(customers)
     customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
@@ -1164,7 +1158,7 @@ def cvrp_generate_assignment(population, max_iter = 4):
             #the case where the customer is closest to the depot than other centroids and there's available vehicle            
             if len(assignment) < population.trucks_count:
                 dist_from_depot = 2 * (np.linalg.norm(customer_coords[cid] - np.array(population.depot)))
-                if dist_from_depot < min_dist:
+                if dist_from_depot < min_dist or best_idx == -1:
                     assignment.append([cid]) 
                     loads.append(customer_demands[cid])
                     centroids.append(cid) 
@@ -1177,7 +1171,44 @@ def cvrp_generate_assignment(population, max_iter = 4):
 
             #the case where no vehicle have enough capacity for the customer
             else:
-                return None #No valid assignment found, try failed
+                if try_count < 10: #try to generate a new assignment
+                    return cvrp_generate_assignment(population, max_iter, try_count + 1)
+                else: 
+                    return cvrp_best_fit_generate_assignment(population)
+    return assignment
+
+def cvrp_best_fit_generate_assignment(population):
+    print("cvrp")
+    customers = [cid for cid in population.coords]
+    random.shuffle(customers)
+    customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
+    customer_demands = population.demands
+    centroids = [customers[0]]  # choose initial centroids randomly
+    assignment = [[c] for c in centroids]  # vehicles initially includes only centroids
+    loads = [customer_demands[c] for c in centroids]  # current loads for each vehicle initialized as the centroid demand
+
+    for cid in customers:
+        best_idx = -1
+        max_load = -float('inf')  # look for the fullest truck that can accept this customer
+
+        for idx, load in enumerate(loads):
+            if load + customer_demands[cid] <= population.truck_capacity:
+                if load > max_load:
+                    max_load = load
+                    best_idx = idx
+
+        # assign to best-fit route
+        if best_idx != -1:
+            assignment[best_idx].append(cid)
+            loads[best_idx] += customer_demands[cid]
+        # open new route if allowed
+        elif len(assignment) < population.trucks_count:
+            assignment.append([cid])
+            loads.append(customer_demands[cid])
+        # no valid assignment found
+        else:
+            return None
+
     return assignment
 
 #A function that finds a random neighbor of an individual
@@ -1298,6 +1329,9 @@ def iteration_statistics(population, iter_no):
 def best_individual(population, elapsed_time, cpu_time, best_solution = None, best_fitness = None):
     if best_solution is None:
         best_ind = min(population.individuals, key=lambda ind: ind.fitness)
+        population.best_fitness.append(best_ind.fitness)
+        population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
+        print("Best Solution Found:")
         if PROBLEM == "CVRP":
             for i, route in enumerate(best_ind.routes):
                 print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
@@ -1341,6 +1375,18 @@ def plot_routes(population, routes):
     plt.legend()
     plt.grid(True)
     plt.axis("equal")
+    plt.show()
+
+# A function that plots the best and avg fitness over iterations
+def plot_iterations_statistics(population):
+    plt.figure(figsize=(12, 6))
+    plt.plot(population.best_fitness, label='Best Fitness', color='blue')
+    plt.plot(population.avg_fitness, label='Average Fitness', color='orange')
+    plt.title('Fitness Over Iterations')
+    plt.xlabel('Iteration')
+    plt.ylabel('Fitness')
+    plt.legend()
+    plt.grid(True)
     plt.show()
 
 #%% Main Function
