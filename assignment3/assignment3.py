@@ -33,7 +33,7 @@ MIGRATION_INTERVAL = 10
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
 CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER, arithmetic, uniform)
-MUTATION_TYPE = "swap" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
+MUTATION_TYPE = "insertion" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
 
 #%% Population and Individual classes
 class CVRPPopulation:
@@ -939,13 +939,87 @@ class BranchAndBoundAlgorithm:
         self.population = population
         self.best_solution = None
         self.best_cost = float('inf')
-        self.k_nearest_neighbors = self.compute_k_nearest_neighbors(k=4) 
+        self.k_nearest_neighbors = self.compute_k_nearest_neighbors(k=3) if PROBLEM == "CVRP" else None
+        self.nodes_processed = 0 if PROBLEM == "ACKLEY" else None
 
     def solve(self):
+        if PROBLEM == "CVRP":
+            self.cvrp_solve()
+        elif PROBLEM == "ACKLEY":
+            self.ackley_solve()
+
+    def ackley_solve(self):
+        elapsed_start_time = time.time()
+        cpu_start_time = time.process_time()
+
+        dim = self.population.dim
+        lower_bound = self.population.lower_bound
+        upper_bound = self.population.upper_bound
+
+        dummy_individual = AckleyIndividual(np.zeros(dim), self.population)
+
+        # Initialize population best_fitness and avg_fitness tracking
+        self.population.best_fitness = []
+        self.population.avg_fitness = []
+
+        # Initialize search queue
+        initial_state = (0, [], 0)  # (bound, vector_so_far, variable_index)
+        queue = PriorityQueue()
+        queue.put(initial_state)
+
+        iteration = 0
+        report_interval = 50000  # print progress every N nodes
+
+        while not queue.empty() and time.time() - elapsed_start_time < TIME_LIMIT:
+            bound, vector_so_far, var_idx = queue.get()
+            self.nodes_processed += 1
+
+            # If full vector assigned → evaluate it
+            if var_idx == dim:
+                vector = np.array(vector_so_far)
+                fitness = dummy_individual.evaluate(vector)
+                if fitness < self.best_cost:
+                    self.best_cost = fitness
+                    self.best_solution = vector.copy()
+                continue
+
+            # Adaptive subdivisions: higher early, lower later
+            subdivisions = 10 #max(8, 14 - var_idx)
+            step = (upper_bound - lower_bound) / subdivisions
+
+            for i in range(subdivisions + 1):
+                xi = lower_bound + i * step
+                new_vector = vector_so_far + [xi]
+
+                # Lower bound estimate: current partial vector padded with 0
+                partial_vector = np.array(new_vector + [0] * (dim - len(new_vector)))
+                partial_cost = dummy_individual.evaluate(partial_vector)
+
+                # Prune if not promising
+                if partial_cost < self.best_cost:
+                    queue.put((partial_cost, new_vector, var_idx + 1))
+
+            # Report progress every N nodes
+            if self.nodes_processed % report_interval == 0:
+                # Update tracking arrays (like other algorithms)
+                self.population.best_fitness.append(self.best_cost)
+                avg_fitness = np.mean([self.best_cost])  # single value here
+                self.population.avg_fitness.append(avg_fitness)
+                iteration_statistics(self.population, iteration)
+                iteration += 1
+
+        elapsed_end_time = time.time()
+        cpu_end_time = time.process_time()
+
+        # Final report using your framework's function
+        best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, self.best_solution, self.best_cost)
+
+    def cvrp_solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
 
         customers = list(self.population.coords.keys())
+        customers.sort(key=lambda cid: np.linalg.norm(np.array(self.population.coords[cid]) - np.array(self.population.depot)))
         initial_state = (0, [], customers, 0, [])  #(priority, current_route, remaining_customers, current_cost, all_routes)
 
         queue = PriorityQueue()
@@ -1005,7 +1079,7 @@ class BranchAndBoundAlgorithm:
             best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
             plot_routes(self.population, best_ind.routes)
 
-    def compute_k_nearest_neighbors(self, k=4):
+    def compute_k_nearest_neighbors(self, k=3):
         neighbors = {}
         all_customers = list(self.population.coords.keys())
         for i in all_customers:
