@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
-LOCAL_OPTIMUM_THRESHOLD = 50
+LOCAL_OPTIMUM_THRESHOLD = 100
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
@@ -63,8 +63,8 @@ class CVRPPopulation:
                 if line.startswith("CAPACITY"): #the truck capacity
                     self.truck_capacity = int(line.split(":")[1])
                 elif line.startswith("COMMENT"): #number of trucks
-                    if "No of trucks" in line:
-                        trucks_count = line.split("No of trucks:")[-1].split(",")[0]
+                    if "of trucks" in line:
+                        trucks_count = line.split("of trucks:")[-1].split(",")[0]
                         self.trucks_count = int(trucks_count.strip())
                     if "Optimal value:" in line:
                         optimal_solution = line.split("Optimal value:")[-1].split(")")[0]
@@ -939,6 +939,7 @@ class BranchAndBoundAlgorithm:
         self.population = population
         self.best_solution = None
         self.best_cost = float('inf')
+        self.k_nearest_neighbors = self.compute_k_nearest_neighbors(k=4) 
 
     def solve(self):
         elapsed_start_time = time.time()
@@ -967,7 +968,16 @@ class BranchAndBoundAlgorithm:
                     print("")
                 continue
 
-            for i, customer in enumerate(remaining):
+            if route:
+                last_customer = route[-1]
+                candidates = [c for c in self.k_nearest_neighbors[last_customer] if c in remaining]
+                if not candidates:
+                    candidates = remaining
+            else:
+                candidates = remaining
+
+            for customer in candidates:
+                i = remaining.index(customer)
                 new_route = route + [customer]
                 new_demand = sum(self.population.demands[c] for c in new_route)
                 new_remaining = remaining[:i] + remaining[i+1:]
@@ -994,6 +1004,19 @@ class BranchAndBoundAlgorithm:
             best_ind.fitness = self.best_cost
             best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
             plot_routes(self.population, best_ind.routes)
+
+    def compute_k_nearest_neighbors(self, k=4):
+        neighbors = {}
+        all_customers = list(self.population.coords.keys())
+        for i in all_customers:
+            distances = []
+            for j in all_customers:
+                if i != j:
+                    dist = self.population.dist_matrix[i][j]
+                    distances.append((dist, j))
+            distances.sort()
+            neighbors[i] = [j for _, j in distances[:k]]
+        return neighbors
 
     def estimate_cost(self, route):
         if not route:
