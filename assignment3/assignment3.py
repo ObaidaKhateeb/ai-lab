@@ -12,7 +12,7 @@ POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 50
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "GA" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 # ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -848,8 +848,8 @@ class GAAlgorithm:
 #%% ALNS Algorithm
 class ALNSAlgorithm:
     def __init__(self, population):
-        self.population = population
-        self.operators = ["relocate", "swap", "remove_insert", "inversion"]
+        self.population = population 
+        self.operators = ["2-opt", "relocate", "reposition", "swap", "shuffle"] if PROBLEM == "CVRP" else ["shift_one", "shift_all", "set_random"]
         self.operator_weights = [1.0] * len(self.operators)
         self.scores = [0.0] * len(self.operators)
         self.uses = [1] * len(self.operators)
@@ -859,10 +859,16 @@ class ALNSAlgorithm:
         cpu_start_time = time.process_time()
 
         while len(self.population.individuals) < POPULATION_SIZE and time.time() - elapsed_start_time < TIME_LIMIT:
-            assignment = cvrp_generate_assignment(self.population)
-            if assignment:
-                new_ind = CVRPIndividual(assignment, self.population)
-                new_ind.evaluate()
+            if PROBLEM == "CVRP":
+                assignment = cvrp_generate_assignment(self.population)
+                if assignment:
+                    new_ind = CVRPIndividual(assignment, self.population)
+                    new_ind.evaluate()
+                    self.population.individuals.append(new_ind)
+            elif PROBLEM == "ACKLEY":
+                assignment = np.random.uniform(self.population.lower_bound, self.population.upper_bound, self.population.dim)
+                new_ind = AckleyIndividual(assignment, self.population)
+                new_ind.fitness = new_ind.evaluate(new_ind.routes)
                 self.population.individuals.append(new_ind)
 
         best_fitness_found = float('inf')
@@ -874,7 +880,10 @@ class ALNSAlgorithm:
             for individual in self.population.individuals:
                 op_idx = self.select_operator()
                 self.uses[op_idx] += 1
-                new_ind = cvrp_find_neighbor(self.population, individual, method=self.operators[op_idx])
+                if PROBLEM == "CVRP":
+                    new_ind = cvrp_find_neighbor(self.population, individual, method=self.operators[op_idx])
+                elif PROBLEM == "ACKLEY":
+                    new_ind = ackley_find_neighbor(self.population, individual, method=self.operators[op_idx])
                 if new_ind.fitness < individual.fitness:
                     individual.routes = new_ind.routes
                     individual.fitness = new_ind.fitness
@@ -921,6 +930,9 @@ class ALNSAlgorithm:
         for i in range(len(self.operator_weights)):
             self.operator_weights[i] = (0.8 * self.operator_weights[i]) + (0.2 * (self.scores[i] / self.uses[i]))
 
+from queue import PriorityQueue
+
+
 #%% Branch and Bound Algorithm for CVRP
 class BranchAndBoundAlgorithm:
     def __init__(self, population):
@@ -933,18 +945,26 @@ class BranchAndBoundAlgorithm:
         cpu_start_time = time.process_time()
 
         customers = list(self.population.coords.keys())
-        initial_state = ([], customers, 0, [])  # (current_route, remaining_customers, current_cost, all_routes)
-        stack = [initial_state]
+        initial_state = (0, [], customers, 0, [])  #(priority, current_route, remaining_customers, current_cost, all_routes)
 
-        while stack and time.time() - elapsed_start_time < TIME_LIMIT:
-            route, remaining, cost, all_routes = stack.pop()
+        queue = PriorityQueue()
+        queue.put(initial_state)
 
+        while not queue.empty() and time.time() - elapsed_start_time < TIME_LIMIT:
+            _, route, remaining, cost, all_routes = queue.get()
+
+            #if no customer remained, evaluate the solution
             if not remaining:
                 total_routes = all_routes + [route] if route else all_routes
-                total_cost = self.calculate_total_cost(total_routes)
+                total_cost = sum(self.estimate_cost(route) for route in total_routes)
                 if total_cost < self.best_cost:
                     self.best_cost = total_cost
                     self.best_solution = total_routes
+                    print(f"New Best Solution Found:")
+                    for i, route in enumerate(self.best_solution):
+                        print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
+                    print(f"Cost: {self.best_cost:.2f}")
+                    print("")
                 continue
 
             for i, customer in enumerate(remaining):
@@ -952,11 +972,19 @@ class BranchAndBoundAlgorithm:
                 new_demand = sum(self.population.demands[c] for c in new_route)
                 new_remaining = remaining[:i] + remaining[i+1:]
 
-                if new_demand <= self.population.truck_capacity:
-                    stack.append((new_route, new_remaining, cost, all_routes))
-                else:
-                    if route:  # finalize current route and start a new one with customer
-                        stack.append(([customer], new_remaining, cost, all_routes + [route]))
+                if new_demand <= self.population.truck_capacity: #truck capacity exceed check
+                    partial_routes = all_routes.copy()
+                    partial_cost = cost
+                    lower_bound = partial_cost + self.estimate_cost(new_route) + self.mst_estimate(new_remaining)
+                    if lower_bound < self.best_cost:
+                        queue.put((lower_bound, new_route, new_remaining, partial_cost, partial_routes))
+                else: #start a new route if the current one exceeds the capacity
+                    if route:
+                        partial_routes = all_routes + [route]
+                        partial_cost = cost + self.estimate_cost(route)
+                        lower_bound = partial_cost + self.estimate_cost([customer]) + self.mst_estimate(new_remaining)
+                        if lower_bound < self.best_cost:
+                            queue.put((lower_bound, [customer], new_remaining, partial_cost, partial_routes))
 
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
@@ -975,8 +1003,30 @@ class BranchAndBoundAlgorithm:
         cost += np.linalg.norm(np.array(self.population.coords[route[-1]]) - np.array(self.population.depot))
         return cost
 
-    def calculate_total_cost(self, routes):
-        return sum(self.estimate_cost(route) for route in routes)
+    #A function that estimates the MST cost for the remaining customers, which used as a lower bound estimate
+    def mst_estimate(self, remaining_customers):
+        if not remaining_customers:
+            return 0
+        coords = [self.population.coords[cid] for cid in remaining_customers]
+        n = len(coords)
+        visited = [False] * n
+        min_edge = [float('inf')] * n
+        min_edge[0] = 0
+        total = 0
+        for _ in range(n):
+            u = -1
+            for i in range(n):
+                if not visited[i] and (u == -1 or min_edge[i] < min_edge[u]):
+                    u = i
+            visited[u] = True
+            total += min_edge[u]
+            for v in range(n):
+                if not visited[v]:
+                    dist = np.linalg.norm(np.array(coords[u]) - np.array(coords[v]))
+                    if dist < min_edge[v]:
+                        min_edge[v] = dist
+        return total
+
 
 
 #%% General Functions
@@ -1240,6 +1290,7 @@ if __name__ == "__main__":
         MUTATION_TYPE = "simple_inversion"
         MIGRATION_RATE = 0.1
         MIGRATION_INTERVAL = 30
+        ISLANDS_COUNT = 6
 
     if PROBLEM == "CVRP":
         if len(sys.argv) != 4:
