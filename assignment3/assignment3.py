@@ -1430,7 +1430,7 @@ def run_full_comparison(input_file):
 
     for algo in algorithms:
         print(f"\n{algo}..\n")
-        if algo == "ILS":
+        if isinstance(algo, tuple) and algo[0] == "ILS":
             ALGORITHM = algo
             ILS_META_HEURISTIC = algo[1]
         else:
