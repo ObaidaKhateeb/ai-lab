@@ -15,7 +15,7 @@ LOCAL_OPTIMUM_THRESHOLD = 100
 MAX_ITERATIONS = 1000
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "ALNS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 #ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -950,7 +950,6 @@ class BranchAndBoundAlgorithm:
         self.best_solution = None
         self.best_cost = float('inf')
         self.k_nearest_neighbors = self.compute_k_nearest_neighbors(k=3) if PROBLEM == "CVRP" else None
-        self.nodes_processed = 0 if PROBLEM == "ACKLEY" else None
 
     def solve(self):
         if PROBLEM == "CVRP":
@@ -961,6 +960,7 @@ class BranchAndBoundAlgorithm:
     def ackley_solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
+        iteration = 0
 
         dim = self.population.dim
         lower_bound = self.population.lower_bound
@@ -975,7 +975,7 @@ class BranchAndBoundAlgorithm:
 
         while not queue.empty() and time.time() - elapsed_start_time < TIME_LIMIT:
             bound, vector_so_far, var_idx = queue.get()
-            self.nodes_processed += 1
+            iteration += 1
 
             #If the vector is full, evaluate it 
             if var_idx == dim:
@@ -1004,6 +1004,13 @@ class BranchAndBoundAlgorithm:
                 if partial_cost < self.best_cost:
                     queue.put((partial_cost, new_vector, var_idx + 1))
 
+            if iteration % 100 == 0: #printing the promising solution every 1000 iterations
+                best_ind = queue.queue[0] if queue.queue else None
+                if best_ind:
+                    best_solution = best_ind[1] 
+                    best_fitness = best_ind[0] 
+                    self.iteration_partial_statistics(iteration, best_solution, best_fitness, best_fitness)
+
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
 
@@ -1014,6 +1021,7 @@ class BranchAndBoundAlgorithm:
     def cvrp_solve(self):
         elapsed_start_time = time.time()
         cpu_start_time = time.process_time()
+        iteration = 0
 
         customers = list(self.population.coords.keys())
         customers.sort(key=lambda cid: np.linalg.norm(np.array(self.population.coords[cid]) - np.array(self.population.depot))) #the sorting meant to take the nearest remained city to the depot each time a new route is started
@@ -1024,7 +1032,7 @@ class BranchAndBoundAlgorithm:
 
         while not queue.empty() and time.time() - elapsed_start_time < TIME_LIMIT:
             _, route, remaining, cost, all_routes = queue.get()
-
+            iteration += 1
             #if no customer remained, evaluate the solution
             if not remaining:
                 total_routes = all_routes + [route] if route else all_routes
@@ -1032,11 +1040,6 @@ class BranchAndBoundAlgorithm:
                 if total_cost < self.best_cost: #if it's better than the currently best, replace it 
                     self.best_cost = total_cost
                     self.best_solution = total_routes
-                    print(f"New Best Solution Found:")
-                    for i, route in enumerate(self.best_solution):
-                        print(f"Route #{i+1}: 0 {' '.join(map(str, route))} 0")
-                    print(f"Cost: {self.best_cost:.2f}")
-                    print("")
                 continue
 
             if route:
@@ -1066,7 +1069,15 @@ class BranchAndBoundAlgorithm:
                         lower_bound = partial_cost + self.estimate_cost([customer]) + self.mst_estimate(new_remaining)
                         if lower_bound < self.best_cost: #if the state is promising insert it into queue
                             queue.put((lower_bound, [customer], new_remaining, partial_cost, partial_routes))
-
+            
+            if iteration % 100 == 0: #printing the promising solution every 1000 iterations
+                best_ind = queue.queue[0] if queue.queue else None
+                if best_ind:
+                    best_solution = best_ind[4] 
+                    best_fitness = best_ind[3] 
+                    best_lower_bound = best_ind[0] 
+                    self.iteration_partial_statistics(iteration, best_solution, best_fitness, best_lower_bound)
+        
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
 
@@ -1122,7 +1133,17 @@ class BranchAndBoundAlgorithm:
                     if dist < min_edge[v]:
                         min_edge[v] = dist
         return total
-
+    
+    # A function that prints the statistics of the current iteration promising solution
+    def iteration_partial_statistics(self, iter_no, best_solution, current_fitness, lower_bound):
+        print(f"Iteration {iter_no} Best Promising Solution:", end=' ')
+        if PROBLEM == "CVRP":
+            routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_solution]
+            print(' '.join(routes_str), end=' ')
+        elif PROBLEM == "ACKLEY":
+            print(f"{best_solution}", end=' ')
+        print(f"(Current Fitness: {int(current_fitness)}, Lower Bound: {int(lower_bound)})")
+        print("")
 
 #%% General Functions
 #A function that generates an assignment of customers to vehicles using k-means clustering
