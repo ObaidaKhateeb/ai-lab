@@ -1045,8 +1045,8 @@ class BranchAndBoundAlgorithm:
             if route:
                 last_customer = route[-1]
                 candidates = [c for c in self.k_nearest_neighbors[last_customer] if c in remaining] #candidates are the k nearest cities
-                if not candidates: #if the k nearest cities already assigned take into account all the other cities 
-                    candidates = remaining
+                if not candidates or len(candidates) == 1:
+                    candidates = self.compute_k_nearest_neighbors(k=2, customer=last_customer, other_customers=remaining)[last_customer]
             else:
                 candidates = remaining
 
@@ -1088,12 +1088,13 @@ class BranchAndBoundAlgorithm:
             plot_routes(self.population, best_ind.routes)
 
     # A function that computes the k nearest neighbors for each customer
-    def compute_k_nearest_neighbors(self, k=3):
+    def compute_k_nearest_neighbors(self, k=3, customer=None, other_customers = None):
         neighbors = {}
-        all_customers = list(self.population.coords.keys())
+        all_customers = list(self.population.coords.keys()) if customer is None else [customer]
+        all_other_customers = list(self.population.coords.keys()) if other_customers is None else other_customers
         for i in all_customers:
             distances = []
-            for j in all_customers:
+            for j in all_other_customers:
                 if i != j:
                     dist = self.population.dist_matrix[i][j]
                     distances.append((dist, j))
