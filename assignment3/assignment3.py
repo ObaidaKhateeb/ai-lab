@@ -10,9 +10,9 @@ from queue import PriorityQueue
 import re
 
 TIME_LIMIT = 0
-POPULATION_SIZE = 10
-LOCAL_OPTIMUM_THRESHOLD = 10
-MAX_ITERATIONS = 10
+POPULATION_SIZE = 1024
+LOCAL_OPTIMUM_THRESHOLD = 100
+MAX_ITERATIONS = 1000
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
@@ -1019,6 +1019,7 @@ class BranchAndBoundAlgorithm:
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, self.best_solution, self.best_cost)
         if PROBLEM == "CVRP":
             plot_routes(self.population, self.best_solution)
+        self.population.best_fitness.append(self.best_cost)
 
     def cvrp_solve(self):
         elapsed_start_time = time.time()
@@ -1088,6 +1089,7 @@ class BranchAndBoundAlgorithm:
             best_ind.fitness = self.best_cost
             best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_ind.routes, best_ind.fitness)
             plot_routes(self.population, best_ind.routes)
+            self.population.best_fitness.append(best_ind.fitness)
 
     # A function that computes the k nearest neighbors for each customer
     def compute_k_nearest_neighbors(self, k=3, customer=None, other_customers = None):
@@ -1424,7 +1426,7 @@ def plot_iterations_statistics(population):
 def run_full_comparison(input_file):
     import copy
     global ALGORITHM, ILS_META_HEURISTIC
-    algorithms = ["MULTI_STAGE_HEURISTIC", ("ILS", "None"), ("ILS", "SA"), ("ILS", "TS"), ("ILS", "ACO"), "GA", "ALNS", "BB"]
+    algorithms = ["MULTI_STAGE_HEURISTIC", ("ILS", "None"), ("ILS", "SA"), ("ILS", "TS"), ("ILS", "ACO"), "GA", "ALNS", "BB"] if PROBLEM == "CVRP" else ["MULTI_STAGE_HEURISTIC", ("ILS", "None"), ("ILS", "SA"), ("ILS", "TS"), "GA", "ALNS", "BB"]
     results = {}
     original_population = CVRPPopulation(input_file) if PROBLEM == "CVRP" else AckleyPopulation()
 
@@ -1462,14 +1464,6 @@ def run_full_comparison(input_file):
             'elapsed_time': end_elapsed - start_elapsed,
             'cpu_time': end_cpu - start_cpu
         }
-        # If algorithm has no iterations (like BB), pad the best_fitness list to length MAX_ITERATIONS
-        if algo == "BB":
-            last_value = results[algo]['best_fitness'][-1] if results[algo]['best_fitness'] else float('inf')
-            results[algo]['best_fitness'] = [float('inf')] * (MAX_ITERATIONS - 1) + [last_value]
-            results[algo]['avg_fitness'] = [float('inf')] * (MAX_ITERATIONS - 1) + [last_value]
-            results[algo]['variance'] = [0.0] * MAX_ITERATIONS
-        if ALGORITHM == "ILS":
-            print(results[str(algo)])
 
     #Best fitness plot
     plt.figure(figsize=(12, 6))
@@ -1526,17 +1520,16 @@ def run_full_comparison(input_file):
 
 
     #Comparison table
-    print("\nCOMPARISON TABLE")
-    print(f"{'Algorithm':<25} {'Best Fitness':<15} {'Avg Fitness':<15} {'Variance':<15} {'Elapsed Time (s)':<20} {'CPU Time (s)':<15}")
+    print("\nComparison of Algorithms (Criterion):")
+    print(f"{'Algorithm':<25} {'Best Fitness':<15} {'Average Fitness':<15} {'Variance':<15} {'Elapsed Time':<15} {'CPU Time':<15}")
     print("-" * 100)
     for algo in algorithms:
-        key = str(algo)
-        print(f"{key:<25} "
-            f"{results[key]['best_fitness'][-1]:<15.2f} "
-            f"{results[key]['avg_fitness'][-1]:<15.2f} "
-            f"{results[key]['variance'][-1]:<15.2f} "
-            f"{results[key]['elapsed_time']:<20.2f} "
-            f"{results[key]['cpu_time']:<15.2f}")
+        best_fitness_last = results[str(algo)]['best_fitness'][-1] if results[str(algo)]['best_fitness'] else float('inf')
+        avg_fitness_last = results[str(algo)]['avg_fitness'][-1] if results[str(algo)]['avg_fitness'] else float('inf')
+        variance_last = results[str(algo)]['variance'][-1] if results[str(algo)]['variance'] else float('inf')
+        elapsed_time = results[str(algo)]['elapsed_time']
+        cpu_time = results[str(algo)]['cpu_time']
+        print(f"{str(algo):<25} {best_fitness_last:<15.2f} {avg_fitness_last:<15.2f} {variance_last:<15.2f} {elapsed_time:<15.2f} {cpu_time:<15.2f}")
 
 
 
