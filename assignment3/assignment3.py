@@ -15,7 +15,7 @@ LOCAL_OPTIMUM_THRESHOLD = 100
 MAX_ITERATIONS = 1000
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
-ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
+ALGORITHM = "ALNS" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
 #ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
@@ -24,7 +24,7 @@ COOLING_RATE = 0.93
 ACO_EVAPORATION_RATE = 0.7
 ACO_Q = 150
 ACO_ALPHA = 1.0
-ACO_BETA = 2.0
+ACO_BETA = 4.5
 
 # GA Parameters
 PARENT_SELECTION_METHOD = "TOURNAMENT_DET" # (TOP_HALF_UNIFORM, RWS, TOURNAMENT_DET, TOURNAMENT_STOCH)
@@ -37,6 +37,9 @@ ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
 CROSSOVER_TYPE = "OX" # (OX, PMX, CX, ER, arithmetic, uniform)
 MUTATION_TYPE = "insertion" # (displacement, swap, insertion, simple_inversion, inversion, scramble)
+
+#ALNS Parameters
+ALNS_PREV_WEIGHT = 0.6 #Operator previous value weight in its new value
 
 #%% Population and Individual classes
 class CVRPPopulation:
@@ -938,8 +941,7 @@ class ALNSAlgorithm:
     # A function that updates the operator weights based on their uses and scores
     def update_weights(self):
         for i in range(len(self.operator_weights)):
-            self.operator_weights[i] = (0.8 * self.operator_weights[i]) + (0.2 * (self.scores[i] / self.uses[i]))
-
+            self.operator_weights[i] = (ALNS_PREV_WEIGHT * self.operator_weights[i]) + ((1-ALNS_PREV_WEIGHT) * (self.scores[i] / self.uses[i]))
 
 #%% Branch and Bound Algorithm for CVRP
 class BranchAndBoundAlgorithm:
@@ -1437,6 +1439,7 @@ if __name__ == "__main__":
         MIGRATION_RATE = 0.1
         MIGRATION_INTERVAL = 30
         ISLANDS_COUNT = 6
+        ALNS_PREV_WEIGHT = 0.8
 
     if PROBLEM == "CVRP":
         if len(sys.argv) != 4:
