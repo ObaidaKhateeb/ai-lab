@@ -10,9 +10,9 @@ from queue import PriorityQueue
 import re
 
 TIME_LIMIT = 0
-POPULATION_SIZE = 512
-LOCAL_OPTIMUM_THRESHOLD = 100
-MAX_ITERATIONS = 1000
+POPULATION_SIZE = 10
+LOCAL_OPTIMUM_THRESHOLD = 10
+MAX_ITERATIONS = 10
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "BB" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
@@ -1431,7 +1431,7 @@ def run_full_comparison(input_file):
     for algo in algorithms:
         print(f"\n{algo}..\n")
         if isinstance(algo, tuple) and algo[0] == "ILS":
-            ALGORITHM = algo
+            ALGORITHM = algo[0]
             ILS_META_HEURISTIC = algo[1]
         else:
             ALGORITHM = algo
@@ -1455,18 +1455,26 @@ def run_full_comparison(input_file):
         end_elapsed = time.time()
         end_cpu = time.process_time()
 
-        results[algo] = {
+        results[str(algo)] = {
             'best_fitness': population.best_fitness,
             'avg_fitness': population.avg_fitness,
             'variance': population.variance,
             'elapsed_time': end_elapsed - start_elapsed,
             'cpu_time': end_cpu - start_cpu
         }
+        # If algorithm has no iterations (like BB), pad the best_fitness list to length MAX_ITERATIONS
+        if algo == "BB":
+            last_value = results[algo]['best_fitness'][-1] if results[algo]['best_fitness'] else float('inf')
+            results[algo]['best_fitness'] = [float('inf')] * (MAX_ITERATIONS - 1) + [last_value]
+            results[algo]['avg_fitness'] = [float('inf')] * (MAX_ITERATIONS - 1) + [last_value]
+            results[algo]['variance'] = [0.0] * MAX_ITERATIONS
+        if ALGORITHM == "ILS":
+            print(results[str(algo)])
 
     #Best fitness plot
     plt.figure(figsize=(12, 6))
     for algo in algorithms:
-        plt.plot(results[algo]['best_fitness'], label=algo)
+        plt.plot(results[str(algo)]['best_fitness'], label=str(algo))
     plt.title('Best Fitness Over Iterations')
     plt.xlabel('Iteration')
     plt.ylabel('Best Fitness')
@@ -1477,7 +1485,7 @@ def run_full_comparison(input_file):
     #Average fitness plot
     plt.figure(figsize=(12, 6))
     for algo in algorithms:
-        plt.plot(results[algo]['avg_fitness'], label=algo)
+        plt.plot(results[str(algo)]['avg_fitness'], label=str(algo))
     plt.title('Average Fitness Over Iterations')
     plt.xlabel('Iteration')
     plt.ylabel('Average Fitness')
@@ -1488,7 +1496,7 @@ def run_full_comparison(input_file):
     #Variance plot
     plt.figure(figsize=(12, 6))
     for algo in algorithms:
-        plt.plot(results[algo]['variance'], label=algo)
+        plt.plot(results[str(algo)]['variance'], label=str(algo))
     plt.title('Variance Over Iterations')
     plt.xlabel('Iteration')
     plt.ylabel('Variance')
@@ -1498,8 +1506,8 @@ def run_full_comparison(input_file):
 
     #Elapsed time plot 
     plt.figure(figsize=(8, 6))
-    elapsed_times = [results[algo]['elapsed_time'] for algo in algorithms]
-    plt.bar(algorithms, elapsed_times)
+    elapsed_times = [results[str(algo)]['elapsed_time'] for algo in algorithms]
+    plt.bar([str(algo) for algo in algorithms], elapsed_times)
     plt.title('Total Elapsed Time per Algorithm')
     plt.ylabel('Elapsed Time (seconds)')
     plt.xticks(rotation=45)
@@ -1508,13 +1516,28 @@ def run_full_comparison(input_file):
 
     #CPU time plot
     plt.figure(figsize=(8, 6))
-    cpu_times = [results[algo]['cpu_time'] for algo in algorithms]
-    plt.bar(algorithms, cpu_times)
+    cpu_times = [results[str(algo)]['cpu_time'] for algo in algorithms]
+    plt.bar([str(algo) for algo in algorithms], cpu_times)
     plt.title('Total CPU Time per Algorithm')
     plt.ylabel('CPU Time (seconds)')
     plt.xticks(rotation=45)
     plt.grid(axis='y')
     plt.show()
+
+
+    #Comparison table
+    print("\nCOMPARISON TABLE")
+    print(f"{'Algorithm':<25} {'Best Fitness':<15} {'Avg Fitness':<15} {'Variance':<15} {'Elapsed Time (s)':<20} {'CPU Time (s)':<15}")
+    print("-" * 100)
+    for algo in algorithms:
+        key = str(algo)
+        print(f"{key:<25} "
+            f"{results[key]['best_fitness'][-1]:<15.2f} "
+            f"{results[key]['avg_fitness'][-1]:<15.2f} "
+            f"{results[key]['variance'][-1]:<15.2f} "
+            f"{results[key]['elapsed_time']:<20.2f} "
+            f"{results[key]['cpu_time']:<15.2f}")
+
 
 
 #%% Main Function
