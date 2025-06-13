@@ -55,6 +55,7 @@ class CVRPPopulation:
         self.individuals = []
         self.best_fitness = []
         self.avg_fitness = []
+        self.variance = []
 
     #A function that extracts the problem inputs
     def _parse_file(self, path):
@@ -148,6 +149,7 @@ class AckleyPopulation:
         self.individuals = []
         self.best_fitness = []
         self.avg_fitness = []
+        self.variance = []
 
 class AckleyIndividual:
     def __init__(self, vector, population):
@@ -1342,6 +1344,8 @@ def iteration_statistics(population, iter_no, best_solution=None, best_fitness_g
         best_fitness = best_fitness_given
     population.best_fitness.append(best_fitness)
     population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
+    population.variance.append(np.var([ind.fitness for ind in population.individuals]))
+
     print(f"Iteration {iter_no} Best:", end=' ')
     if PROBLEM == "CVRP":
         routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind]
@@ -1357,6 +1361,8 @@ def best_individual(population, elapsed_time, cpu_time, best_solution = None, be
         best_ind = min(population.individuals, key=lambda ind: ind.fitness)
         population.best_fitness.append(best_ind.fitness)
         population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
+        population.variance.append(np.var([ind.fitness for ind in population.individuals]))
+
         print("Best Solution Found:")
         if PROBLEM == "CVRP":
             for i, route in enumerate(best_ind.routes):
@@ -1414,6 +1420,102 @@ def plot_iterations_statistics(population):
     plt.legend()
     plt.grid(True)
     plt.show()
+
+def run_full_comparison(input_file):
+    import copy
+    global ALGORITHM, ILS_META_HEURISTIC
+    algorithms = ["MULTI_STAGE_HEURISTIC", ("ILS", "None"), ("ILS", "SA"), ("ILS", "TS"), ("ILS", "ACO"), "GA", "ALNS", "BB"]
+    results = {}
+    original_population = CVRPPopulation(input_file) if PROBLEM == "CVRP" else AckleyPopulation()
+
+    for algo in algorithms:
+        print(f"\n{algo}..\n")
+        if algo == "ILS":
+            ALGORITHM = algo
+            ILS_META_HEURISTIC = algo[1]
+        else:
+            ALGORITHM = algo
+
+        population = copy.deepcopy(original_population)
+
+        if ALGORITHM == "MULTI_STAGE_HEURISTIC":
+            solver = MSHeuristicsAlgorithm(population)
+        elif ALGORITHM == "ILS":
+            solver = ILSAlgorithm(population)
+        elif ALGORITHM == "GA":
+            solver = GAAlgorithm(population)
+        elif ALGORITHM == "ALNS":
+            solver = ALNSAlgorithm(population)
+        elif ALGORITHM == "BB":
+            solver = BranchAndBoundAlgorithm(population)
+
+        start_elapsed = time.time()
+        start_cpu = time.process_time()
+        solver.solve()
+        end_elapsed = time.time()
+        end_cpu = time.process_time()
+
+        results[algo] = {
+            'best_fitness': population.best_fitness,
+            'avg_fitness': population.avg_fitness,
+            'variance': population.variance,
+            'elapsed_time': end_elapsed - start_elapsed,
+            'cpu_time': end_cpu - start_cpu
+        }
+
+    #Best fitness plot
+    plt.figure(figsize=(12, 6))
+    for algo in algorithms:
+        plt.plot(results[algo]['best_fitness'], label=algo)
+    plt.title('Best Fitness Over Iterations')
+    plt.xlabel('Iteration')
+    plt.ylabel('Best Fitness')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    #Average fitness plot
+    plt.figure(figsize=(12, 6))
+    for algo in algorithms:
+        plt.plot(results[algo]['avg_fitness'], label=algo)
+    plt.title('Average Fitness Over Iterations')
+    plt.xlabel('Iteration')
+    plt.ylabel('Average Fitness')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    #Variance plot
+    plt.figure(figsize=(12, 6))
+    for algo in algorithms:
+        plt.plot(results[algo]['variance'], label=algo)
+    plt.title('Variance Over Iterations')
+    plt.xlabel('Iteration')
+    plt.ylabel('Variance')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    #Elapsed time plot 
+    plt.figure(figsize=(8, 6))
+    elapsed_times = [results[algo]['elapsed_time'] for algo in algorithms]
+    plt.bar(algorithms, elapsed_times)
+    plt.title('Total Elapsed Time per Algorithm')
+    plt.ylabel('Elapsed Time (seconds)')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y')
+    plt.show()
+
+    #CPU time plot
+    plt.figure(figsize=(8, 6))
+    cpu_times = [results[algo]['cpu_time'] for algo in algorithms]
+    plt.bar(algorithms, cpu_times)
+    plt.title('Total CPU Time per Algorithm')
+    plt.ylabel('CPU Time (seconds)')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y')
+    plt.show()
+
 
 #%% Main Function
 def main(input_file):
@@ -1473,4 +1575,5 @@ if __name__ == "__main__":
             sys.exit(1)
     else:
         input_file = None
-    main(input_file)
+    #main(input_file)
+    run_full_comparison(input_file)
