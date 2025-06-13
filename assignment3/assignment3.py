@@ -17,7 +17,7 @@ MAX_ITERATIONS = 1000
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
 
-# ILS Parameters
+#ILS Parameters
 ILS_META_HEURISTIC = "None" # (None, SA, TS, ACO)
 CURRENT_TEMPERATURE = 5
 COOLING_RATE = 0.93
@@ -346,7 +346,7 @@ class ILSAlgorithm:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-            iteration_statistics(self.population, iter_count)
+            iteration_statistics(self.population, iter_count, best_solution_found, best_fitness_found)
             iter_count += 1
             
         elapsed_end_time = time.time()
@@ -442,7 +442,8 @@ class ILSAlgorithm:
                 # self.pheromone[key] += ACO_Q / individual.fitness
                 for i in range(len(route) - 1):
                     key = (route[i], route[i + 1])
-                    self.pheromone[key] += ACO_Q / individual.fitness
+                    if key[0] != key[1]:
+                        self.pheromone[key] += ACO_Q / individual.fitness
 
 #%% GA with Island Model
 class GAAlgorithm:
@@ -476,7 +477,7 @@ class GAAlgorithm:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-            iteration_statistics(self.population, self.generation)
+            iteration_statistics(self.population, self.generation, best_solution_found, best_fitness_found)
 
         elapsed_end_time = time.time()
         cpu_end_time = time.process_time()
@@ -911,7 +912,7 @@ class ALNSAlgorithm:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-            iteration_statistics(self.population, iter_count)
+            iteration_statistics(self.population, iter_count, best_solution_found, best_fitness_found)
             iter_count += 1
 
         elapsed_end_time = time.time()
@@ -1308,18 +1309,22 @@ def update_temperature():
     CURRENT_TEMPERATURE = COOLING_RATE * CURRENT_TEMPERATURE
 
 #A function that prints the current best solution after each iteration
-def iteration_statistics(population, iter_no):
-    best_ind = min(population.individuals, key=lambda ind: ind.fitness)
-    population.best_fitness.append(best_ind.fitness)
+def iteration_statistics(population, iter_no, best_solution=None, best_fitness_given=None):
+    if best_solution is None:
+        best_ind = min(population.individuals.routes, key=lambda ind: ind.fitness)
+        best_fitness = best_ind.fitness
+    else:
+        best_ind = best_solution
+        best_fitness = best_fitness_given
+    population.best_fitness.append(best_fitness)
     population.avg_fitness.append(np.mean([ind.fitness for ind in population.individuals]))
     print(f"Iteration {iter_no} Best:", end=' ')
     if PROBLEM == "CVRP":
-        routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind.routes]
+        routes_str = [f"[0 {' '.join(map(str, route))} 0]" for route in best_ind]
         print(' '.join(routes_str), end=' ')
     elif PROBLEM == "ACKLEY":
-        routes_str = best_ind.routes
-        print(f"{routes_str}", end=' ')
-    print(f"({int(best_ind.fitness)})")
+        print(f"{best_ind}", end=' ')
+    print(f"({int(best_fitness)})")
     print("")
 
 #A function that prints the best solution found after the algorithm finishes
