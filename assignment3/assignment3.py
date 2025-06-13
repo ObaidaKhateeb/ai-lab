@@ -12,7 +12,7 @@ import re
 TIME_LIMIT = 0
 POPULATION_SIZE = 512
 LOCAL_OPTIMUM_THRESHOLD = 100
-MAX_ITERATIONS = 10000
+MAX_ITERATIONS = 1000
 
 PROBLEM = "CVRP" # (CVRP, ACKLEY)
 ALGORITHM = "MULTI_STAGE_HEURISTIC" # (MULTI_STAGE_HEURISTIC, ILS, GA, ALNS, BB)
@@ -31,7 +31,7 @@ PARENT_SELECTION_METHOD = "TOURNAMENT_DET" # (TOP_HALF_UNIFORM, RWS, TOURNAMENT_
 TOURNAMENT_K = 15
 TOURNAMENT_P = 0.86
 MIGRATION_RATE = 0.05
-ISLANDS_COUNT = 4
+ISLANDS_COUNT = 7
 MIGRATION_INTERVAL = 25
 ELITISM_RATE = 0.1
 MUTATION_RATE = 0.25
@@ -353,9 +353,9 @@ class ILSAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":
             plot_routes(self.population, best_solution_found)
+        plot_iterations_statistics(self.population)
 
     #A function that initializes the tabu list and set with the hash of current population individuals
     def tabu_hash_initiallize(self):
@@ -482,9 +482,9 @@ class GAAlgorithm:
         cpu_end_time = time.process_time()
 
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":    
             plot_routes(self.population, best_solution_found)
+        plot_iterations_statistics(self.population)
 
     # A function that initializes the individuals and the islands 
     def individual_islands_initialize(self):
@@ -918,9 +918,9 @@ class ALNSAlgorithm:
         cpu_end_time = time.process_time()
         
         best_individual(self.population, elapsed_end_time - elapsed_start_time, cpu_end_time - cpu_start_time, best_solution_found, best_fitness_found)
-        plot_iterations_statistics(self.population)
         if PROBLEM == "CVRP":
             plot_routes(self.population, best_solution_found)
+        plot_iterations_statistics(self.population)
 
     # A function that selects an operator, using a weighted random choice
     def select_operator(self):
@@ -1171,42 +1171,39 @@ def cvrp_generate_assignment(population, max_iter = 4, try_count = 0):
 
             #the case where no vehicle have enough capacity for the customer
             else:
-                if try_count < 10: #try to generate a new assignment
+                if try_count < 3: #try to generate a new assignment
                     return cvrp_generate_assignment(population, max_iter, try_count + 1)
-                else: 
-                    return cvrp_best_fit_generate_assignment(population)
+                else: #if the assignment failed 3 times, try best-fit approach
+                    return cvrp_best_fit_generate_assignment(population) 
     return assignment
 
+#A function that generates an assignment of customers to vehicles using a best-fit approach
 def cvrp_best_fit_generate_assignment(population):
-    print("cvrp")
     customers = [cid for cid in population.coords]
     random.shuffle(customers)
-    customer_coords = {cid: np.array(population.coords[cid]) for cid in customers}
     customer_demands = population.demands
-    centroids = [customers[0]]  # choose initial centroids randomly
-    assignment = [[c] for c in centroids]  # vehicles initially includes only centroids
-    loads = [customer_demands[c] for c in centroids]  # current loads for each vehicle initialized as the centroid demand
+    centroids = [customers[0]]  #choose initial centroids randomly
+    assignment = [[c] for c in centroids]  #vehicles initially includes only centroids
+    loads = [customer_demands[c] for c in centroids]  #current loads for each vehicle initialized as the centroid demand
 
     for cid in customers:
         best_idx = -1
-        max_load = -float('inf')  # look for the fullest truck that can accept this customer
+        max_load = -float('inf') 
 
+        #looking for the truck with the most load that can still accommodate the customer
         for idx, load in enumerate(loads):
-            if load + customer_demands[cid] <= population.truck_capacity:
+            if load + customer_demands[cid] <= population.truck_capacity: 
                 if load > max_load:
                     max_load = load
                     best_idx = idx
 
-        # assign to best-fit route
-        if best_idx != -1:
+        if best_idx != -1: #if a route found 
             assignment[best_idx].append(cid)
             loads[best_idx] += customer_demands[cid]
-        # open new route if allowed
-        elif len(assignment) < population.trucks_count:
+        elif len(assignment) < population.trucks_count: #if no route found but there's available vehicle
             assignment.append([cid])
             loads.append(customer_demands[cid])
-        # no valid assignment found
-        else:
+        else: #no valid assignment 
             return None
 
     return assignment
