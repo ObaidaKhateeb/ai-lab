@@ -61,13 +61,13 @@ TEAM_ALIASES = {
     "arsenal": ["arsenal", "afc", "ארסנל"],
     "chelsea": ["chelsea", "cfc", "צ'לסי"],
     "tottenham": ["tottenham", "spurs", "thfc", "טוטנהאם"],
-    "barcelona": ["barcelona", "barca", "fcb", "ברצלונה"],
+    "barcelona": ["barcelona", "barca", "fc barcelona", "ברצלונה"],
     "real_madrid": ["real madrid", "madrid", "rm", "ריאל מדריד"],
     "atletico_madrid": ["atletico madrid", "atletico", "atm", "אתלטיקו מדריד"],
     "juventus": ["juventus", "juve", "יובנטוס"],
     "milan": ["milan", "ac milan", "acm", "מילאן"],
     "inter_milan": ["inter milan", "inter", "אינטר"],
-    "bayern_munich": ["bayern munich", "bayern", "fcb", "באיירן"],
+    "bayern_munich": ["bayern munich", "bayern", "fc bayern", "באיירן"],
     "borussia_dortmund": ["borussia dortmund", "dortmund", "bvb", "דורטמונד"],
     "psg": ["psg", "paris saint germain", "paris", "פריז"]
 }
@@ -85,14 +85,15 @@ class AIJerseyScraper:
             self.client = None
             print("Warning: No ANTHROPIC_API_KEY found. AI features will be limited.")
         
+        self.playwright = None
         self.browser: Optional[Browser] = None
         self.context = None
         self.page: Optional[Page] = None
     
     async def start_browser(self):
         """Start the browser instance."""
-        playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=True)
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=True)
         self.context = await self.browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
@@ -104,6 +105,8 @@ class AIJerseyScraper:
             await self.context.close()
         if self.browser:
             await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
     
     def use_ai_to_detect_team(self, text: str, teams: List[str]) -> Optional[str]:
         """Use AI to detect which team a text refers to."""
@@ -440,19 +443,13 @@ Examples: "Men's Jersey" -> men_jerseys, "Kids Kit" -> kids_kits, "Women Jersey"
                 
                 save_dir = output_dir / category / team
                 
-                # Download first image as the main image
-                if image_urls:
-                    extension = ".jpg" if ".jpg" in image_urls[0] else ".png"
-                    save_path = save_dir / f"{kit_type}{extension}"
-                    
-                    success = await self.download_image(image_urls[0], save_path)
-                    if success:
-                        print(f"  ✓ Saved: {save_path}")
-                
-                # Download additional images if there are multiple
-                for idx, img_url in enumerate(image_urls[1:], start=2):
+                # Download images
+                for idx, img_url in enumerate(image_urls, start=1):
                     extension = ".jpg" if ".jpg" in img_url else ".png"
-                    save_path = save_dir / f"{kit_type}_{idx}{extension}"
+                    if idx == 1:
+                        save_path = save_dir / f"{kit_type}{extension}"
+                    else:
+                        save_path = save_dir / f"{kit_type}_{idx}{extension}"
                     
                     success = await self.download_image(img_url, save_path)
                     if success:
