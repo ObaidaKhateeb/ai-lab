@@ -35,9 +35,9 @@ except ImportError:
 
 # Constants
 CATEGORIES = {
-    "men_jerseys": ["men", "גברים", "חולצות גברים", "jersey", "shirt"],
+    "men_jerseys": ["men's", "mens", "גברים", "חולצות גברים", "male"],
     "men_long_jerseys": ["long sleeve", "ארוכות", "חולצות גברים ארוכות", "long"],
-    "women_jerseys": ["women", "נשים", "חליפות נשים", "ladies"],
+    "women_jerseys": ["women", "women's", "womens", "נשים", "חליפות נשים", "ladies", "female"],
     "kids_kits": ["kids", "children", "ילדים", "חליפות ילדים", "youth", "junior"],
     "shorts": ["shorts", "מכנסיים", "pants"]
 }
@@ -194,9 +194,14 @@ Examples: "Home Kit 2025" -> first, "Away Jersey" -> second, "Third Kit" -> thir
     def use_ai_to_detect_category(self, text: str) -> Optional[str]:
         """Use AI to detect which category a text refers to."""
         if not self.client:
-            # Fallback to simple matching
+            # Fallback to simple matching - check more specific categories first
             text_lower = text.lower()
-            for category, keywords in CATEGORIES.items():
+            
+            # Priority order: more specific categories first
+            priority_order = ["women_jerseys", "kids_kits", "men_long_jerseys", "shorts", "men_jerseys"]
+            
+            for category in priority_order:
+                keywords = CATEGORIES[category]
                 for keyword in keywords:
                     if keyword.lower() in text_lower:
                         return category
@@ -222,9 +227,14 @@ Examples: "Men's Jersey" -> men_jerseys, "Kids Kit" -> kids_kits, "Women Jersey"
             return None
         except Exception as e:
             print(f"AI detection error: {e}")
-            # Fallback to simple matching
+            # Fallback to simple matching - check more specific categories first
             text_lower = text.lower()
-            for category, keywords in CATEGORIES.items():
+            
+            # Priority order: more specific categories first
+            priority_order = ["women_jerseys", "kids_kits", "men_long_jerseys", "shorts", "men_jerseys"]
+            
+            for category in priority_order:
+                keywords = CATEGORIES[category]
                 for keyword in keywords:
                     if keyword.lower() in text_lower:
                         return category
